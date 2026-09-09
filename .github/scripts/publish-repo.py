@@ -3,319 +3,601 @@ import hashlib
 import html
 import json
 import math
+import os
 import sys
-import time
 from pathlib import Path
 
 import index_pb2
-from github_utils import REPO_NAME, run_gh
 from google.protobuf import json_format
 
-# Artifacts downloaded from the build jobs: one APK per extension plus the source metadata JSON
-# emitted by each assembleRelease.
+
 ARTIFACTS_DIR = Path.home() / "apk-artifacts"
 
-# The checked-out `repo` branch we publish into (the working directory).
-REPO_DIR = Path.cwd()
+# main 分支源码目录
+SOURCE_DIR = Path(os.environ["SOURCE_DIR"])
 
-ICON_BASE_URL = "https://cdn.jsdelivr.net/gh/keiyoushi/extensions-source@main"
-RELEASE_BASE_URL = f"https://github.com/{REPO_NAME}/releases/download"
-ASSET_LIMIT = 495  # Actual limit is 1000 but we upload 2 items per extension.
-UPLOAD_CHUNK_SIZE = 80
-UPLOAD_CHUNK_INTERVAL = 30
+# repo 分支工作目录
+REPO_DIR = Path(os.environ["REPO_DIR"])
 
-to_delete: list[str] = json.loads(sys.argv[1])
-current_sha = sys.argv[2]
-current_sha_short = current_sha[:7]
+REPO_NAME = os.environ["EXTENSIONS_REPO"]
+SOURCE_REPO = os.environ["SOURCE_REPO"]
+SIGNING_KEY = os.environ["SIGNING_KEY_FINGERPRINT"]
 
-with REPO_DIR.joinpath("index.json").open() as f:
-    remote_proto = json_format.Parse(f.read(), index_pb2.Index())
+ICON_BASE_URL = (
+    f"https://cdn.jsdelivr.net/gh/{SOURCE_REPO}@main"
+)
 
-remote_extensions = {
-    ext.packageName: ext for ext in remote_proto.extensionList.extensions
-}
+RELEASE_BASE_URL = (
+    f"https://github.com/{REPO_NAME}/releases/download"
+)
 
-release_assets_path = REPO_DIR / "release-assets.json"
-if release_assets_path.exists():
-    with release_assets_path.open() as f:
-        release_assets = json.load(f)
-else:
-    release_assets = {}
+CURRENT_SHA = os.environ["GITHUB_SHA"]
+CURRENT_SHA_SHORT = CURRENT_SHA[:7]
 
-updated_release_assets = {
-    package_name: assets
-    for package_name, assets in release_assets.items()
-    if not any(package_name.endswith(f".{module}") for module in to_delete)
-}
-
-# Build index entries for the freshly built apks. Each extension's metadata comes from the
-# source-info JSON emitted by its assembleRelease task (see GenerateSourceInfoTask); its APK is a
-# sibling in the same build dir. aapt reads the icon out of the APK
-new_extensions: list[tuple[index_pb2.Extension, Path, Path, bool, bool]] = []
-
-SOURCE_DIR = Path(__file__).resolve().parents[2]
 ICON_FILE = "res/mipmap-xhdpi/ic_launcher.png"
 
 
 def get_icon_url(module: str, theme: str | None) -> str:
     module_icon = f"src/{module.replace('.', '/')}/{ICON_FILE}"
+
     if (SOURCE_DIR / module_icon).exists():
         return f"{ICON_BASE_URL}/{module_icon}"
 
     if theme:
         theme_icon = f"lib-multisrc/{theme}/{ICON_FILE}"
+
         if (SOURCE_DIR / theme_icon).exists():
             return f"{ICON_BASE_URL}/{theme_icon}"
 
     return f"{ICON_BASE_URL}/core/src/main/{ICON_FILE}"
 
 
-for info_file in ARTIFACTS_DIR.glob("**/keiyoushi-source-info.json"):
-    with info_file.open(encoding="utf-8") as f:
-        info = json.load(f)
-    package_name = info["packageName"]
-    apk = next((info_file.parent / "outputs/apk/release").glob("*.apk"), None)
-    if apk is None:
-        raise FileNotFoundError(
-            f"{package_name}: no release apk found under {info_file.parent}"
+def load_existing_index():
+    index_file = REPO_DIR / "index.json"
+
+    if not index_file.exists():
+        return index_pb2.Index()
+
+    if index_file.stat().st_size == 0:
+        return index_pb2.Index()
+
+    with index_file.open(encoding="utf-8") as f:
+        return json_format.Parse(
+            f.read(),
+            index_pb2.Index(),
         )
 
-    jar = next((info_file.parent / "outputs/jar/release").glob("*.jar"), None)
-    if jar is None:
-        raise FileNotFoundError(
-            f"{package_name}: no release jar found under {info_file.parent}"
-        )
 
-    assets = {
-        "apk": {
-            "name": apk.name,
-            "sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
-        },
-        "jar": {
-            "name": jar.name,
-            "sha256": hashlib.sha256(jar.read_bytes()).hexdigest(),
-        },
-    }
-    old_assets = release_assets.get(package_name, {})
-    apk_changed = (
-        package_name not in remote_extensions
-        or old_assets.get("apk") != assets["apk"]
-    )
-    jar_changed = (
-        package_name not in remote_extensions
-        or old_assets.get("jar") != assets["jar"]
-    )
+def load_release_assets():
+    path = REPO_DIR / "release-assets.json"
 
-    updated_release_assets[package_name] = assets
+    if not path.exists():
+        return {}
 
-    ext = index_pb2.Extension(
-        name=info["name"],
-        packageName=package_name,
-        resources=index_pb2.Resources(
-            iconUrl=get_icon_url(info["module"], info.get("theme")),
-        ),
-        extensionLib=info["extensionLib"],
-        versionCode=info["versionCode"],
-        versionName=info["versionName"],
-        contentWarning=info["contentWarning"],
-        sources=[
-            index_pb2.Source(
-                id=int(source["id"]),
-                name=source["name"],
-                language=source["lang"],
-                homeUrl=source["baseUrl"],
-                mirrorUrls=source.get("mirrorUrls", []),
-            )
-            for source in info["sources"]
-        ],
-    )
-    new_extensions.append((ext, apk, jar, apk_changed, jar_changed))
-
-new_extensions.sort(key=lambda item: item[0].packageName)
-
-changed_extensions = [item for item in new_extensions if item[3] or item[4]]
-total_changed_extensions = len(changed_extensions)
-release_count = (
-    math.ceil(total_changed_extensions / ASSET_LIMIT)
-    if total_changed_extensions
-    else 0
-)
-ext_per_release = (
-    math.ceil(total_changed_extensions / release_count) if release_count else 0
-)
+    with path.open(encoding="utf-8") as f:
+        return json.load(f)
 
 
-def get_release_tag(batch_index: int) -> str:
-    return (
-        f"{current_sha_short}-{batch_index}" if release_count > 1 else current_sha_short
-    )
+def find_build_artifacts():
+    results = []
 
-
-changed_index = 0
-for ext, apk, jar, apk_changed, jar_changed in new_extensions:
-    if apk_changed or jar_changed:
-        tag = get_release_tag(changed_index // ext_per_release)
-        old_resources = remote_extensions.get(ext.packageName)
-        ext.resources.apkUrl = (
-            f"{RELEASE_BASE_URL}/{tag}/{apk.name}"
-            if apk_changed
-            else old_resources.resources.apkUrl
-        )
-        ext.resources.jarUrl = (
-            f"{RELEASE_BASE_URL}/{tag}/{jar.name}"
-            if jar_changed
-            else old_resources.resources.jarUrl
-        )
-        changed_index += 1
-    else:
-        old_resources = remote_extensions[ext.packageName].resources
-        ext.resources.apkUrl = old_resources.apkUrl
-        ext.resources.jarUrl = old_resources.jarUrl
-
-# Merge with the already-published index, dropping the deleted/rebuilt modules.
-final_extensions = []
-final_extensions.extend(
-    ext
-    for ext in remote_proto.extensionList.extensions
-    if not any(ext.packageName.endswith(f".{module}") for module in to_delete)
-)
-final_extensions.extend(ext for ext, _, _, _, _ in new_extensions)
-final_extensions.sort(key=lambda ext: ext.packageName)
-
-index = index_pb2.Index(
-    name="Keiyoushi",
-    badgeLabel="KEI",
-    signingKey="9add655a78e96c4ec7a53ef89dccb557cb5d767489fac5e785d671a5a75d4da2",
-    contact=index_pb2.Contact(
-        website="https://keiyoushi.github.io",
-        discord="https://discord.gg/3FbCpdKbdY",
-    ),
-    extensionList=index_pb2.ExtensionList(extensions=final_extensions),
-)
-
-with REPO_DIR.joinpath("index.json").open("w", encoding="utf-8") as f:
-    f.write(
-        json_format.MessageToJson(
-            index,
-            always_print_fields_with_no_presence=False,
-            preserving_proto_field_name=True,
-        )
-    )
-
-with REPO_DIR.joinpath("index.pb").open("wb") as f:
-    f.write(gzip.compress(index.SerializeToString(deterministic=True), mtime=0))
-
-with release_assets_path.open("w", encoding="utf-8") as f:
-    json.dump(updated_release_assets, f, indent=2, sort_keys=True)
-    f.write("\n")
-
-with REPO_DIR.joinpath("index.html").open("w", encoding="utf-8") as f:
-    f.write(
-        '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>apks</title>\n</head>\n<body>\n<pre>\n'
-    )
-    for ext in final_extensions:
-        apk_escaped = html.escape(ext.resources.apkUrl)
-        name_escaped = html.escape(f"Tachiyomi: {ext.name}")
-        f.write(f'<a href="{apk_escaped}">{name_escaped}</a>\n')
-    f.write("</pre>\n</body>\n</html>\n")
-
-# --- Upload assets as release ---
-if not changed_extensions:
-    sys.exit(0)
-
-
-def create_release(tag: str):
-    if run_gh(
-        "release",
-        "view",
-        tag,
-        "--repo",
-        REPO_NAME,
-        "--json",
-        "tagName",
-        success_errors=("release not found",),
+    for info_file in ARTIFACTS_DIR.glob(
+        "**/keiyoushi-source-info.json"
     ):
-        print(f"Release {tag} already exists")
-        return
+        with info_file.open(encoding="utf-8") as f:
+            info = json.load(f)
 
-    print(f"Creating release {tag}")
-    run_gh(
-        "release",
-        "create",
-        tag,
-        "--repo",
-        REPO_NAME,
-        "--draft",
-        "--title",
-        f"Repository Update {tag}",
-        "--notes",
-        f"Automated update from keiyoushi/extensions-source@{current_sha}",
-    )
+        package_name = info["packageName"]
 
-
-def publish_release(tag: str):
-    print(f"Publishing release {tag}")
-    run_gh("release", "edit", tag, "--repo", REPO_NAME, "--draft=false")
-
-
-def get_release_assets(tag: str) -> dict[str, str]:
-    release = json.loads(
-        run_gh(
-            "release",
-            "view",
-            tag,
-            "--repo",
-            REPO_NAME,
-            "--json",
-            "assets",
+        apk_dir = (
+            info_file.parent
+            / "outputs/apk/release"
         )
-    )
-    return {
-        asset["name"]: (asset.get("digest") or "").removeprefix("sha256:")
-        for asset in release["assets"]
+
+        jar_dir = (
+            info_file.parent
+            / "outputs/jar/release"
+        )
+
+        apk = next(apk_dir.glob("*.apk"), None)
+
+        if apk is None:
+            raise FileNotFoundError(
+                f"{package_name}: release APK not found"
+            )
+
+        jar = next(jar_dir.glob("*.jar"), None)
+
+        if jar is None:
+            raise FileNotFoundError(
+                f"{package_name}: release JAR not found"
+            )
+
+        results.append(
+            (info, apk, jar)
+        )
+
+    if not results:
+        raise RuntimeError(
+            "No keiyoushi-source-info.json found"
+        )
+
+    return results
+
+
+def main():
+    remote_proto = load_existing_index()
+
+    remote_extensions = {
+        ext.packageName: ext
+        for ext in remote_proto.extensionList.extensions
     }
 
+    release_assets = load_release_assets()
 
-def upload_assets(tag: str, files: list[Path]):
-    if not files:
+    updated_release_assets = dict(
+        release_assets
+    )
+
+    new_extensions = []
+
+    for info, apk, jar in find_build_artifacts():
+
+        package_name = info["packageName"]
+
+        assets = {
+            "apk": {
+                "name": apk.name,
+                "sha256": hashlib.sha256(
+                    apk.read_bytes()
+                ).hexdigest(),
+            },
+            "jar": {
+                "name": jar.name,
+                "sha256": hashlib.sha256(
+                    jar.read_bytes()
+                ).hexdigest(),
+            },
+        }
+
+        old_assets = release_assets.get(
+            package_name,
+            {},
+        )
+
+        apk_changed = (
+            package_name not in remote_extensions
+            or old_assets.get("apk") != assets["apk"]
+        )
+
+        jar_changed = (
+            package_name not in remote_extensions
+            or old_assets.get("jar") != assets["jar"]
+        )
+
+        updated_release_assets[
+            package_name
+        ] = assets
+
+        extension = index_pb2.Extension(
+            name=info["name"],
+            packageName=package_name,
+
+            resources=index_pb2.Resources(
+                iconUrl=get_icon_url(
+                    info["module"],
+                    info.get("theme"),
+                ),
+            ),
+
+            extensionLib=info["extensionLib"],
+            versionCode=info["versionCode"],
+            versionName=info["versionName"],
+            contentWarning=info["contentWarning"],
+
+            sources=[
+                index_pb2.Source(
+                    id=int(source["id"]),
+                    name=source["name"],
+                    language=source["lang"],
+                    homeUrl=source["baseUrl"],
+                    mirrorUrls=source.get(
+                        "mirrorUrls",
+                        [],
+                    ),
+                )
+                for source in info["sources"]
+            ],
+        )
+
+        new_extensions.append(
+            (
+                extension,
+                apk,
+                jar,
+                apk_changed,
+                jar_changed,
+            )
+        )
+
+    new_extensions.sort(
+        key=lambda item: item[0].packageName
+    )
+
+    changed_extensions = [
+        item
+        for item in new_extensions
+        if item[3] or item[4]
+    ]
+
+    total_changed = len(changed_extensions)
+
+    ASSET_LIMIT = 495
+
+    release_count = (
+        math.ceil(
+            total_changed / ASSET_LIMIT
+        )
+        if total_changed
+        else 0
+    )
+
+    ext_per_release = (
+        math.ceil(
+            total_changed / release_count
+        )
+        if release_count
+        else 0
+    )
+
+    def get_release_tag(batch_index):
+        if release_count > 1:
+            return f"{CURRENT_SHA_SHORT}-{batch_index}"
+
+        return CURRENT_SHA_SHORT
+
+    changed_index = 0
+
+    for (
+        extension,
+        apk,
+        jar,
+        apk_changed,
+        jar_changed,
+    ) in new_extensions:
+
+        package_name = extension.packageName
+
+        if apk_changed or jar_changed:
+
+            tag = get_release_tag(
+                changed_index // ext_per_release
+            )
+
+            old = remote_extensions.get(
+                package_name
+            )
+
+            if apk_changed:
+                extension.resources.apkUrl = (
+                    f"{RELEASE_BASE_URL}/"
+                    f"{tag}/"
+                    f"{apk.name}"
+                )
+            elif old:
+                extension.resources.apkUrl = (
+                    old.resources.apkUrl
+                )
+
+            if jar_changed:
+                extension.resources.jarUrl = (
+                    f"{RELEASE_BASE_URL}/"
+                    f"{tag}/"
+                    f"{jar.name}"
+                )
+            elif old:
+                extension.resources.jarUrl = (
+                    old.resources.jarUrl
+                )
+
+            changed_index += 1
+
+        else:
+            old = remote_extensions[
+                package_name
+            ]
+
+            extension.resources.apkUrl = (
+                old.resources.apkUrl
+            )
+
+            extension.resources.jarUrl = (
+                old.resources.jarUrl
+            )
+
+    # 只保留我们自己仓库已经发布的扩展，
+    # 再用当前新构建版本替换。
+    final_extensions = list(
+        remote_proto.extensionList.extensions
+    )
+
+    for extension, *_ in new_extensions:
+        final_extensions = [
+            old
+            for old in final_extensions
+            if old.packageName
+            != extension.packageName
+        ]
+
+        final_extensions.append(
+            extension
+        )
+
+    final_extensions.sort(
+        key=lambda ext: ext.packageName
+    )
+
+    index = index_pb2.Index(
+        name=os.environ.get(
+            "REPO_DISPLAY_NAME",
+            "My Extensions",
+        ),
+
+        badgeLabel="CUSTOM",
+
+        signingKey=SIGNING_KEY,
+
+        contact=index_pb2.Contact(
+            website=(
+                f"https://github.com/"
+                f"{REPO_NAME}"
+            ),
+        ),
+
+        extensionList=index_pb2.ExtensionList(
+            extensions=final_extensions
+        ),
+    )
+
+    REPO_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    # index.json
+    with (
+        REPO_DIR / "index.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write(
+            json_format.MessageToJson(
+                index,
+                always_print_fields_with_no_presence=False,
+                preserving_proto_field_name=True,
+            )
+        )
+
+    # index.min.json
+    with (
+        REPO_DIR / "index.min.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            json.loads(
+                json_format.MessageToJson(
+                    index,
+                    always_print_fields_with_no_presence=False,
+                    preserving_proto_field_name=True,
+                )
+            ),
+            f,
+            separators=(",", ":"),
+        )
+
+    # index.pb
+    with (
+        REPO_DIR / "index.pb"
+    ).open("wb") as f:
+        f.write(
+            gzip.compress(
+                index.SerializeToString(
+                    deterministic=True
+                ),
+                mtime=0,
+            )
+        )
+
+    # release-assets.json
+    with (
+        REPO_DIR / "release-assets.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            updated_release_assets,
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+        f.write("\n")
+
+    # repo.json
+    repo_json = {
+        "index_v2": (
+            f"https://github.com/"
+            f"{REPO_NAME}/raw/repo/index.pb"
+        ),
+        "meta": {
+            "name": os.environ.get(
+                "REPO_DISPLAY_NAME",
+                "My Extensions",
+            ),
+            "website": (
+                f"https://github.com/"
+                f"{REPO_NAME}"
+            ),
+            "signingKeyFingerprint": SIGNING_KEY,
+        },
+    }
+
+    with (
+        REPO_DIR / "repo.json"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+        json.dump(
+            repo_json,
+            f,
+            indent=2,
+        )
+        f.write("\n")
+
+    # index.html
+    with (
+        REPO_DIR / "index.html"
+    ).open(
+        "w",
+        encoding="utf-8",
+    ) as f:
+
+        f.write(
+            "<!DOCTYPE html>\n"
+            "<html>\n"
+            "<head>\n"
+            '<meta charset="UTF-8">\n'
+            "<title>Extensions</title>\n"
+            "</head>\n"
+            "<body>\n"
+            "<pre>\n"
+        )
+
+        for extension in final_extensions:
+
+            apk_url = html.escape(
+                extension.resources.apkUrl
+            )
+
+            name = html.escape(
+                f"Tachiyomi: {extension.name}"
+            )
+
+            f.write(
+                f'<a href="{apk_url}">'
+                f"{name}</a>\n"
+            )
+
+        f.write(
+            "</pre>\n"
+            "</body>\n"
+            "</html>\n"
+        )
+
+    print(
+        f"Extensions in index: "
+        f"{len(final_extensions)}"
+    )
+
+    print(
+        f"Changed extensions: "
+        f"{total_changed}"
+    )
+
+    # 没有新的 APK/JAR，不需要创建 Release
+    if not changed_extensions:
         return
 
-    existing_assets = get_release_assets(tag)
-    files_to_upload = [
-        file
-        for file in files
-        if existing_assets.get(file.name)
-        != hashlib.sha256(file.read_bytes()).hexdigest()
-    ]
-    skipped = len(files) - len(files_to_upload)
-    print(f"Uploading {len(files_to_upload)} assets to {tag}, skipping {skipped}")
+    # GitHub CLI 必须使用 GITHUB_TOKEN
+    for batch_index in range(
+        release_count
+    ):
 
-    for i in range(0, len(files_to_upload), UPLOAD_CHUNK_SIZE):
-        chunk = files_to_upload[i : i + UPLOAD_CHUNK_SIZE]
-        if i:
-            time.sleep(UPLOAD_CHUNK_INTERVAL)
-        print(f"  assets {i + 1}-{i + len(chunk)} of {len(files_to_upload)}")
-        run_gh(
-            "release",
-            "upload",
-            tag,
-            *[str(f) for f in chunk],
-            "--repo",
-            REPO_NAME,
-            "--clobber",
+        start = (
+            batch_index
+            * ext_per_release
         )
-    publish_release(tag)
+
+        end = (
+            start
+            + ext_per_release
+        )
+
+        batch = changed_extensions[
+            start:end
+        ]
+
+        tag = get_release_tag(
+            batch_index
+        )
+
+        release_exists = os.system(
+            f'gh release view "{tag}" '
+            f'--repo "{REPO_NAME}" '
+            f'>/dev/null 2>&1'
+        ) == 0
+
+        if not release_exists:
+
+            os.system(
+                f'gh release create '
+                f'"{tag}" '
+                f'--repo "{REPO_NAME}" '
+                f'--draft '
+                f'--title "Repository Update {tag}" '
+                f'--notes "Automated Roumanwu update"'
+            )
+
+        files = []
+
+        for (
+            _,
+            apk,
+            jar,
+            apk_changed,
+            jar_changed,
+        ) in batch:
+
+            if apk_changed:
+                files.append(apk)
+
+            if jar_changed:
+                files.append(jar)
+
+        if files:
+
+            command = [
+                "gh",
+                "release",
+                "upload",
+                tag,
+                *[
+                    str(file)
+                    for file in files
+                ],
+                "--repo",
+                REPO_NAME,
+                "--clobber",
+            ]
+
+            os.system(
+                " ".join(
+                    f'"{part}"'
+                    for part in command
+                )
+            )
+
+        os.system(
+            f'gh release edit '
+            f'"{tag}" '
+            f'--repo "{REPO_NAME}" '
+            f'--draft=false'
+        )
 
 
-for i in range(0, total_changed_extensions, ext_per_release):
-    batch = changed_extensions[i : i + ext_per_release]
-    tag = get_release_tag(i // ext_per_release)
-    files_to_upload = [
-        file
-        for _, apk, jar, apk_changed, jar_changed in batch
-        for file, changed in ((apk, apk_changed), (jar, jar_changed))
-        if changed
-    ]
-
-    create_release(tag)
-    upload_assets(tag, files_to_upload)
+if __name__ == "__main__":
+    main()
