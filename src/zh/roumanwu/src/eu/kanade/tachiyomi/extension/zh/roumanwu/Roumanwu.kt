@@ -22,7 +22,6 @@ import java.util.Locale
 @Source
 abstract class Roumanwu : HttpSource() {
 
-```
 override val supportsLatest = true
 
 override val client = network.client.newBuilder()
@@ -31,9 +30,8 @@ override val client = network.client.newBuilder()
 
 override fun popularMangaRequest(page: Int) = GET("$baseUrl/home", headers)
 
-private fun parseEntries(container: Element): List<SManga> = container
-    .select("a[href*=/books/]")
-    .mapNotNull { element ->
+private fun parseEntries(container: Element): List<SManga> {
+    return container.select("a[href*=/books/]").mapNotNull { element ->
         val title = element.selectFirst("div.truncate")?.text()?.trim()
         val url = element.attr("href").takeIf { it.isNotBlank() }
 
@@ -54,28 +52,29 @@ private fun parseEntries(container: Element): List<SManga> = container
             thumbnail_url = thumbnail
         }
     }
+}
 
 override fun popularMangaParse(response: Response): MangasPage {
     val document = response.asJsoup()
     return parseHomePage(document, Regex("正熱門|今日最佳|本週熱門"))
 }
 
-private fun parseHomePage(document: Document, sections: Regex): MangasPage {
+private fun parseHomePage(
+    document: Document,
+    sections: Regex,
+): MangasPage {
     val container = document.selectFirst("div.px-1")
         ?: return MangasPage(emptyList(), false)
 
-    val entries = container
-        .children()
-        .flatMap { section ->
-            val title = section.children().firstOrNull()?.text().orEmpty()
+    val entries = container.children().flatMap { section ->
+        val title = section.children().firstOrNull()?.text().orEmpty()
 
-            if (title.contains(sections)) {
-                parseEntries(section)
-            } else {
-                emptyList()
-            }
+        if (title.contains(sections)) {
+            parseEntries(section)
+        } else {
+            emptyList()
         }
-        .distinctBy { it.url }
+    }.distinctBy { it.url }
 
     return MangasPage(entries, false)
 }
@@ -263,6 +262,5 @@ companion object {
     private val DATE_FORMAT = SimpleDateFormat("M/d/yyyy", Locale.ROOT)
     private val IMAGE_URL_REGEX = Regex(""""imageUrl":"([^"]+)""")
 }
-```
 
 }
