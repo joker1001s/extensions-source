@@ -1,4 +1,3 @@
-```kotlin
 package eu.kanade.tachiyomi.extension.zh.roumanwu
 
 import eu.kanade.tachiyomi.network.GET
@@ -387,4 +386,3 @@ abstract class Roumanwu : HttpSource() {
             )
     }
 }
-```
