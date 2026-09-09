@@ -1,0 +1,37 @@
+{
+  "name": "joker1001s Extensions",
+  "badgeLabel": "CUSTOM",
+  "signingKey": "7BA167FE6CFABEC27148FE5BA994150EB64688385F97E3EAEE8556FB14AB5408",
+  "contact": {
+    "website": "https://github.com/joker1001s/extensions-source"
+  },
+  "extensionList": {
+    "extensions": [
+      {
+        "name": "Roumanwu",
+        "packageName": "eu.kanade.tachiyomi.extension.zh.roumanwu",
+        "resources": {
+          "apkUrl": "https://github.com/joker1001s/extensions-source/releases/download/d9d3920/tachiyomi-zh.roumanwu-v1.4.20.apk",
+          "iconUrl": "https://cdn.jsdelivr.net/gh/joker1001s/extensions-source@main/src/zh/roumanwu/res/mipmap-xhdpi/ic_launcher.png",
+          "jarUrl": "https://github.com/joker1001s/extensions-source/releases/download/d9d3920/tachiyomi-zh.roumanwu-v1.4.20.jar"
+        },
+        "extensionLib": "1.4",
+        "versionCode": "104020",
+        "versionName": "1.4.20",
+        "contentWarning": "CONTENT_WARNING_NSFW",
+        "sources": [
+          {
+            "id": "3647420805839021718",
+            "name": "\u8089\u6f2b\u5c4b",
+            "language": "zh",
+            "homeUrl": "https://rouman5.com",
+            "mirrorUrls": [
+              "https://rouman5.com",
+              "https://roum27.xyz"
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
