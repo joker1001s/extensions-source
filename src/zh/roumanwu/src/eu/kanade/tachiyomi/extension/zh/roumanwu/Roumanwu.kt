@@ -216,12 +216,10 @@ abstract class Roumanwu : HttpSource() {
         return chapters
     }
 
-    override fun pageListRequest(chapter: SChapter): Request {
-        return super.pageListRequest(chapter)
-            .newBuilder()
-            .addHeader("rsc", "1")
-            .build()
-    }
+    override fun pageListRequest(chapter: SChapter): Request = super.pageListRequest(chapter)
+        .newBuilder()
+        .addHeader("rsc", "1")
+        .build()
 
     override fun pageListParse(response: Response): List<Page> {
         val html = response.body.string()
@@ -247,10 +245,11 @@ abstract class Roumanwu : HttpSource() {
         abstract fun toUriPart(): String
     }
 
-    private class StatusFilter : UriPartFilter(
-        "狀態",
-        arrayOf("全部", "連載中", "已完結"),
-    ) {
+    private class StatusFilter :
+        UriPartFilter(
+            "狀態",
+            arrayOf("全部", "連載中", "已完結"),
+        ) {
         override fun toUriPart() = when (state) {
             1 -> "&continued=true"
             2 -> "&continued=false"
