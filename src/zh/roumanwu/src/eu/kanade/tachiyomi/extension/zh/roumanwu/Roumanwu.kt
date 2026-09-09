@@ -31,19 +31,20 @@ abstract class Roumanwu : HttpSource() {
     override fun popularMangaRequest(page: Int) = GET("$baseUrl/home", headers)
 
     private fun parseEntries(container: Element): List<SManga> {
-        return container.select("a[href*=/books/]").mapNotNull { element ->
-            val title = element.selectFirst("div.truncate")?.text()?.trim()
+        return container.select("a.site-comic[href*=/books/]").mapNotNull { element ->
             val url = element.attr("href").takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
 
-            if (title.isNullOrBlank() || url == null) {
-                return@mapNotNull null
-            }
+            val title = element
+                .selectFirst("h3")
+                ?.text()
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?: return@mapNotNull null
 
             val thumbnail = element
-                .selectFirst("div.bg-cover")
-                ?.attr("style")
-                ?.substringAfter("background-image:url(\"", "")
-                ?.substringBefore("\")", "")
+                .selectFirst("img")
+                ?.absUrl("src")
                 ?.takeIf { it.isNotBlank() }
 
             SManga.create().apply {
@@ -51,30 +52,16 @@ abstract class Roumanwu : HttpSource() {
                 this.url = url
                 thumbnail_url = thumbnail
             }
-        }
+        }.distinctBy { it.url }
     }
 
     override fun popularMangaParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        return parseHomePage(document, Regex("正熱門|今日最佳|本週熱門"))
+        return parseHomePage(document)
     }
 
-    private fun parseHomePage(
-        document: Document,
-        sections: Regex,
-    ): MangasPage {
-        val container = document.selectFirst("div.px-1")
-            ?: return MangasPage(emptyList(), false)
-
-        val entries = container.children().flatMap { section ->
-            val title = section.children().firstOrNull()?.text().orEmpty()
-
-            if (title.contains(sections)) {
-                parseEntries(section)
-            } else {
-                emptyList()
-            }
-        }.distinctBy { it.url }
+    private fun parseHomePage(document: Document): MangasPage {
+        val entries = parseEntries(document)
 
         return MangasPage(entries, false)
     }
@@ -83,7 +70,7 @@ abstract class Roumanwu : HttpSource() {
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
-        return parseHomePage(document, Regex("最近更新"))
+        return parseHomePage(document)
     }
 
     override fun searchMangaRequest(
