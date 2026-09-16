@@ -350,12 +350,10 @@ abstract class Roumanwu : HttpSource() {
         return chapters
     }
 
-    override fun pageListRequest(chapter: SChapter): Request {
-        return super.pageListRequest(chapter)
-            .newBuilder()
-            .addHeader("rsc", "1")
-            .build()
-    }
+    override fun pageListRequest(chapter: SChapter): Request = super.pageListRequest(chapter)
+        .newBuilder()
+        .addHeader("rsc", "1")
+        .build()
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
@@ -440,8 +438,7 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? =
-        values.firstOrNull { !it.isNullOrBlank() }?.trim()
+    private fun firstNonEmpty(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }?.trim()
 
     private fun String.unescapeUrl(): String = replace("\\/", "/")
         .replace("\\u002F", "/")
