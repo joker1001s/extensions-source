@@ -35,29 +35,21 @@ abstract class Roumanwu : HttpSource() {
     override fun headersBuilder() = super.headersBuilder()
         .add("Referer", "$baseUrl/")
 
-    override fun popularMangaRequest(page: Int): Request {
-        return GET("$baseUrl/manga?page=$page", headers)
-    }
+    override fun popularMangaRequest(page: Int): Request =
+        GET("$baseUrl/manga?page=$page", headers)
 
-    override fun popularMangaParse(response: Response): MangasPage {
-        return parseMangaPage(response)
-    }
+    override fun popularMangaParse(response: Response): MangasPage =
+        parseMangaPage(response)
 
-    override fun popularMangaNextPageSelector(): String? {
-        return null
-    }
+    override fun popularMangaNextPageSelector(): String? = null
 
-    override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/manga?sort=latest&page=$page", headers)
-    }
+    override fun latestUpdatesRequest(page: Int): Request =
+        GET("$baseUrl/manga?sort=latest&page=$page", headers)
 
-    override fun latestUpdatesParse(response: Response): MangasPage {
-        return parseMangaPage(response)
-    }
+    override fun latestUpdatesParse(response: Response): MangasPage =
+        parseMangaPage(response)
 
-    override fun latestUpdatesNextPageSelector(): String? {
-        return null
-    }
+    override fun latestUpdatesNextPageSelector(): String? = null
 
     override fun searchMangaRequest(
         page: Int,
@@ -68,19 +60,14 @@ abstract class Roumanwu : HttpSource() {
         return GET("$baseUrl/search?q=$encodedQuery&page=$page", headers)
     }
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        return parseMangaPage(response)
-    }
+    override fun searchMangaParse(response: Response): MangasPage =
+        parseMangaPage(response)
 
-    override fun searchMangaNextPageSelector(): String? {
-        return null
-    }
+    override fun searchMangaNextPageSelector(): String? = null
 
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            Filter.Header("搜索支持网站自身搜索"),
-        )
-    }
+    override fun getFilterList(): FilterList = FilterList(
+        Filter.Header("搜索支持网站自身搜索"),
+    )
 
     private fun parseMangaPage(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -133,9 +120,8 @@ abstract class Roumanwu : HttpSource() {
         )
     }
 
-    override fun mangaDetailsRequest(manga: SManga): Request {
-        return GET(baseUrl + manga.url, headers)
-    }
+    override fun mangaDetailsRequest(manga: SManga): Request =
+        GET(baseUrl + manga.url, headers)
 
     override fun mangaDetailsParse(response: Response): SManga {
         val document = response.asJsoup()
@@ -175,9 +161,8 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun chapterListRequest(manga: SManga): Request {
-        return GET(baseUrl + manga.url, headers)
-    }
+    override fun chapterListRequest(manga: SManga): Request =
+        GET(baseUrl + manga.url, headers)
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
@@ -475,14 +460,13 @@ abstract class Roumanwu : HttpSource() {
         return result.sortedByDescending { it.chapter_number }
     }
 
-    private fun normalizeChapterUrl(url: String): String {
-        return when {
+    private fun normalizeChapterUrl(url: String): String =
+        when {
             url.startsWith("http://") -> url.removePrefix(baseUrl)
             url.startsWith("https://") -> url.removePrefix(baseUrl)
             url.startsWith("/") -> url
             else -> "/$url"
         }
-    }
 
     private fun parseChapterNumber(name: String): Float {
         val match = Regex(
@@ -536,9 +520,8 @@ abstract class Roumanwu : HttpSource() {
         else -> SManga.UNKNOWN
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? = values
-        .firstOrNull { !it.isNullOrBlank() }
-        ?.trim()
+    private fun firstNonEmpty(vararg values: String?): String? =
+        values.firstOrNull { !it.isNullOrBlank() }?.trim()
 
     private fun String.unescapeUrl(): String = replace("\\/", "/")
         .replace("\\u002F", "/")
