@@ -64,29 +64,29 @@ abstract class Roumanwu : HttpSource() {
         return parseMangaList(document)
     }
 
-    override fun searchMangaRequest(
-        page: Int,
-        query: String,
-        filters: FilterList,
-    ): Request {
-        val pageIndex = page - 1
-    
-        return if (query.isNotBlank()) {
-            GET(
-                "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
-                headers,
-            )
-        } else {
-            GET(
-                if (page == 1) {
-                    "$baseUrl/books"
-                } else {
-                    "$baseUrl/books?page=$pageIndex"
-                },
-                headers,
-            )
-        }
+override fun searchMangaRequest(
+    page: Int,
+    query: String,
+    filters: FilterList,
+): Request {
+    val pageIndex = page - 1
+
+    return if (query.isNotBlank()) {
+        GET(
+            "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
+            headers,
+        )
+    } else {
+        GET(
+            if (page == 1) {
+                "$baseUrl/books"
+            } else {
+                "$baseUrl/books?page=$pageIndex"
+            },
+            headers,
+        )
     }
+}
 
     override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
