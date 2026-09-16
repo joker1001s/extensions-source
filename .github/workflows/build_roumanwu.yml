@@ -53,11 +53,6 @@ jobs:
           printf '%s' "$SIGNING_KEY" | base64 --decode > signingkey.jks
           chmod 600 signingkey.jks
 
-      # 先让项目自己的 Spotless 自动格式化 Kotlin
-      - name: Apply Spotless
-        run: |
-          ./gradlew spotlessApply
-
       - name: Build Roumanwu
         env:
           ALIAS: ${{ secrets.ALIAS }}
