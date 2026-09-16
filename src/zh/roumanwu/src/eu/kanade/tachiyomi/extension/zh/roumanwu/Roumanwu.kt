@@ -19,13 +19,7 @@ import java.util.Locale
 
 @Source
 abstract class Roumanwu : HttpSource() {
-
-    override val name = "Roumanwu"
-
-    override val baseUrl = "https://www.rouman5.com"
-
-    override val lang = "zh"
-
+    
     override val supportsLatest = true
 
     override val client = network.client.newBuilder()
