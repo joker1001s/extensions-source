@@ -76,8 +76,10 @@ abstract class Roumanwu : HttpSource() {
 
     override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
-    private fun parseMangaList(document: Document): MangasPage =
-        MangasPage(parseEntries(document), hasNextPage(document))
+    private fun parseMangaList(document: Document): MangasPage = MangasPage(
+        parseEntries(document),
+        hasNextPage(document),
+    )
 
     private fun parseEntries(container: Element): List<SManga> {
         return container
@@ -220,11 +222,7 @@ abstract class Roumanwu : HttpSource() {
 
             status = parseStatus(data["狀態"])
 
-            description = buildDescription(
-                alias,
-                title,
-                synopsis,
-            )
+            description = buildDescription(alias, title, synopsis)
 
             genre = genres
                 .takeIf { it.isNotEmpty() }
@@ -282,14 +280,12 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseStatus(value: String?): Int {
-        return when {
-            value?.contains("連載中") == true -> SManga.ONGOING
-            value?.contains("連載") == true -> SManga.ONGOING
-            value?.contains("已完結") == true -> SManga.COMPLETED
-            value?.contains("完結") == true -> SManga.COMPLETED
-            else -> SManga.UNKNOWN
-        }
+    private fun parseStatus(value: String?): Int = when {
+        value?.contains("連載中") == true -> SManga.ONGOING
+        value?.contains("連載") == true -> SManga.ONGOING
+        value?.contains("已完結") == true -> SManga.COMPLETED
+        value?.contains("完結") == true -> SManga.COMPLETED
+        else -> SManga.UNKNOWN
     }
 
     private fun buildDescription(
@@ -358,11 +354,10 @@ abstract class Roumanwu : HttpSource() {
         return chapters
     }
 
-    override fun pageListRequest(chapter: SChapter): Request =
-        super.pageListRequest(chapter)
-            .newBuilder()
-            .addHeader("rsc", "1")
-            .build()
+    override fun pageListRequest(chapter: SChapter): Request = super.pageListRequest(chapter)
+        .newBuilder()
+        .addHeader("rsc", "1")
+        .build()
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
@@ -402,9 +397,8 @@ abstract class Roumanwu : HttpSource() {
     }
 
     private fun parseImagePaths(body: String): List<String> {
-        val matches = IMAGE_PATHS_REGEX.findAll(body)
-
-        return matches
+        return IMAGE_PATHS_REGEX
+            .findAll(body)
             .flatMap { match ->
                 URL_IN_ARRAY_REGEX
                     .findAll(match.groupValues[1])
@@ -456,27 +450,21 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? {
-        return values
-            .firstOrNull { !it.isNullOrBlank() }
-            ?.trim()
-    }
+    private fun firstNonEmpty(vararg values: String?): String? =
+        values.firstOrNull { !it.isNullOrBlank() }?.trim()
 
-    private fun String.unescapeUrl(): String {
-        return replace("\\/", "/")
+    private fun String.unescapeUrl(): String =
+        replace("\\/", "/")
             .replace("\\u002F", "/")
             .replace("&amp;", "&")
             .replace("\\u0026", "&")
             .trim()
-    }
 
-    override fun imageUrlParse(response: Response): String =
-        response.request.url.toString()
+    override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
-    override fun getFilterList(): FilterList =
-        FilterList(
-            Filter.Header("搜尋漫畫時不使用篩選條件"),
-        )
+    override fun getFilterList(): FilterList = FilterList(
+        Filter.Header("搜尋漫畫時不使用篩選條件"),
+    )
 
     companion object {
         private val DATE_FORMATS = listOf(
