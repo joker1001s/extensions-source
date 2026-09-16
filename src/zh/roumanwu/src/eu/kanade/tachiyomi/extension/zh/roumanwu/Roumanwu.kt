@@ -41,8 +41,7 @@ abstract class Roumanwu : HttpSource() {
 
     override fun popularMangaNextPageSelector(): String? = null
 
-    override fun latestUpdatesRequest(page: Int): Request =
-        GET("$baseUrl/manga?sort=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/manga?sort=latest&page=$page", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage = parseMangaPage(response)
 
