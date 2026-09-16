@@ -2,11 +2,11 @@
   "eu.kanade.tachiyomi.extension.zh.roumanwu": {
     "apk": {
       "name": "tachiyomi-zh.roumanwu-v1.4.21.apk",
-      "sha256": "403a04aac419f8191ce4f230be5634ab61b5bebe1fc79ebd2a7bcff64e26d1d5"
+      "sha256": "4933e9a89e361d59de7260488ac8a4ad037e13bc20193593000ca73fd329b696"
     },
     "jar": {
       "name": "tachiyomi-zh.roumanwu-v1.4.21.jar",
-      "sha256": "7b8f6d87a540078cf5122a89a39c80f17bde303984628fc5b503379beaef2255"
+      "sha256": "486713053868de10f07da1c85d929949c3eba3cd0c3edf3e600bfe14219a96fc"
     }
   }
 }

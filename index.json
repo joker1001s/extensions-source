@@ -11,9 +11,9 @@
         "name": "Roumanwu",
         "packageName": "eu.kanade.tachiyomi.extension.zh.roumanwu",
         "resources": {
-          "apkUrl": "https://github.com/joker1001s/extensions-source/releases/download/937c9a5/tachiyomi-zh.roumanwu-v1.4.21.apk",
+          "apkUrl": "https://github.com/joker1001s/extensions-source/releases/download/77bd5ce/tachiyomi-zh.roumanwu-v1.4.21.apk",
           "iconUrl": "https://cdn.jsdelivr.net/gh/joker1001s/extensions-source@main/src/zh/roumanwu/res/mipmap-xhdpi/ic_launcher.png",
-          "jarUrl": "https://github.com/joker1001s/extensions-source/releases/download/937c9a5/tachiyomi-zh.roumanwu-v1.4.21.jar"
+          "jarUrl": "https://github.com/joker1001s/extensions-source/releases/download/77bd5ce/tachiyomi-zh.roumanwu-v1.4.21.jar"
         },
         "extensionLib": "1.4",
         "versionCode": "104021",
