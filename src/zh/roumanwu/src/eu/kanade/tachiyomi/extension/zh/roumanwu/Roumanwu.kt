@@ -362,61 +362,184 @@ abstract class Roumanwu : HttpSource() {
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
 
-        val imagePaths = parseImagePaths(body)
+        return parseChapterImages(body).mapIndexed { index, url ->
+            Page(
+                index = index,
+                imageUrl = url,
+            )
+        }
+    }
 
-        if (imagePaths.isNotEmpty()) {
-            return imagePaths.mapIndexed { index, url ->
-                Page(
-                    index = index,
-                    imageUrl = url,
-                )
+    private fun parseChapterImages(body: String): List<String> {
+        val result = mutableListOf<String>()
+        var searchStart = 0
+
+        while (searchStart < body.length) {
+            val marker = findImagePathsMarker(body, searchStart)
+
+            if (marker < 0) {
+                break
+            }
+
+            val arrayStart = findArrayStart(body, marker)
+
+            if (arrayStart < 0) {
+                searchStart = marker + IMAGE_PATHS.length
+                continue
+            }
+
+            val arrayEnd = findArrayEnd(body, arrayStart)
+
+            if (arrayEnd < 0) {
+                searchStart = arrayStart + 1
+                continue
+            }
+
+            val arrayContent = body.substring(
+                arrayStart + 1,
+                arrayEnd,
+            )
+
+            extractUrls(arrayContent)
+                .mapNotNull(::normalizeImageUrl)
+                .filter(::isComicImageUrl)
+                .forEach { url ->
+                    if (url !in result) {
+                        result.add(url)
+                    }
+                }
+
+            searchStart = arrayEnd + 1
+        }
+
+        return result
+    }
+
+    private fun findImagePathsMarker(
+        body: String,
+        start: Int,
+    ): Int {
+        val candidates = listOf(
+            "\"imagePaths\"",
+            "'imagePaths'",
+            "imagePaths:",
+            "imagePaths=",
+        )
+
+        return candidates
+            .map { body.indexOf(it, start) }
+            .filter { it >= 0 }
+            .minOrNull()
+            ?: -1
+    }
+
+    private fun findArrayStart(
+        body: String,
+        marker: Int,
+    ): Int {
+        val colon = body.indexOf(':', marker)
+        val equals = body.indexOf('=', marker)
+
+        val separator = when {
+            colon >= 0 && equals >= 0 -> minOf(colon, equals)
+            colon >= 0 -> colon
+            equals >= 0 -> equals
+            else -> return -1
+        }
+
+        var index = separator + 1
+
+        while (index < body.length) {
+            when (body[index]) {
+                ' ', '\t', '\n', '\r' -> index++
+                '[' -> return index
+                else -> return -1
             }
         }
 
-        val imageUrls = IMAGE_URL_REGEX
-            .findAll(body)
+        return -1
+    }
+
+    private fun findArrayEnd(
+        body: String,
+        start: Int,
+    ): Int {
+        var depth = 0
+        var quoted = false
+        var escaped = false
+
+        for (index in start until body.length) {
+            val char = body[index]
+
+            if (quoted) {
+                if (escaped) {
+                    escaped = false
+                    continue
+                }
+
+                if (char == '\\') {
+                    escaped = true
+                    continue
+                }
+
+                if (char == '"') {
+                    quoted = false
+                }
+
+                continue
+            }
+
+            when (char) {
+                '"' -> quoted = true
+                '[' -> depth++
+                ']' -> {
+                    depth--
+
+                    if (depth == 0) {
+                        return index
+                    }
+                }
+            }
+        }
+
+        return -1
+    }
+
+    private fun extractUrls(array: String): List<String> {
+        return IMAGE_STRING_REGEX
+            .findAll(array)
             .mapNotNull { match ->
                 match.groupValues
                     .getOrNull(1)
                     ?.unescapeUrl()
-                    ?.takeIf(::isValidImageUrl)
+                    ?.takeIf(String::isNotBlank)
             }
-            .distinct()
-            .toList()
-
-        if (imageUrls.isNotEmpty()) {
-            return imageUrls.mapIndexed { index, url ->
-                Page(
-                    index = index,
-                    imageUrl = url,
-                )
-            }
-        }
-
-        return emptyList()
-    }
-
-    private fun parseImagePaths(body: String): List<String> {
-        return IMAGE_PATHS_REGEX
-            .findAll(body)
-            .flatMap { match ->
-                URL_IN_ARRAY_REGEX
-                    .findAll(match.groupValues[1])
-                    .mapNotNull { urlMatch ->
-                        urlMatch.groupValues
-                            .getOrNull(1)
-                            ?.unescapeUrl()
-                            ?.takeIf(::isValidImageUrl)
-                    }
-            }
-            .distinct()
             .toList()
     }
 
-    private fun isValidImageUrl(url: String): Boolean {
-        val normalized = url
+    private fun normalizeImageUrl(value: String): String? {
+        val url = value
             .trim()
+            .replace("\\/", "/")
+            .replace("\\u002F", "/")
+            .replace("&amp;", "&")
+            .replace("\\u0026", "&")
+            .trim('"', '\'')
+
+        return when {
+            url.startsWith("https://") -> url
+            url.startsWith("http://") -> url
+            url.startsWith("//") -> "https:$url"
+            url.startsWith("/") -> "$baseUrl$url"
+            else -> null
+        }
+    }
+
+    private fun isComicImageUrl(url: String): Boolean {
+        val normalized = url
             .lowercase(Locale.ROOT)
+            .substringBefore('?')
+            .substringBefore('#')
 
         if (!normalized.startsWith("http://") &&
             !normalized.startsWith("https://")
@@ -424,12 +547,31 @@ abstract class Roumanwu : HttpSource() {
             return false
         }
 
-        return !normalized.contains("loading.jpg") &&
-            !normalized.contains("loading.gif") &&
-            !normalized.contains("favicon") &&
-            !normalized.contains("logo") &&
-            !normalized.contains("avatar") &&
-            !normalized.contains("banner")
+        val blockedKeywords = listOf(
+            "loading",
+            "favicon",
+            "logo",
+            "avatar",
+            "banner",
+            "popup",
+            "pop-up",
+            "advert",
+            "ads",
+            "adsense",
+            "googlead",
+            "tracking",
+            "icon",
+        )
+
+        if (blockedKeywords.any(normalized::contains)) {
+            return false
+        }
+
+        return normalized.endsWith(".jpg") ||
+            normalized.endsWith(".jpeg") ||
+            normalized.endsWith(".png") ||
+            normalized.endsWith(".webp") ||
+            normalized.endsWith(".gif")
     }
 
     private fun parseDate(value: String?): Long {
@@ -450,15 +592,13 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? =
-        values.firstOrNull { !it.isNullOrBlank() }?.trim()
+    private fun firstNonEmpty(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }?.trim()
 
-    private fun String.unescapeUrl(): String =
-        replace("\\/", "/")
-            .replace("\\u002F", "/")
-            .replace("&amp;", "&")
-            .replace("\\u0026", "&")
-            .trim()
+    private fun String.unescapeUrl(): String = replace("\\/", "/")
+        .replace("\\u002F", "/")
+        .replace("&amp;", "&")
+        .replace("\\u0026", "&")
+        .trim()
 
     override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
@@ -467,6 +607,8 @@ abstract class Roumanwu : HttpSource() {
     )
 
     companion object {
+        private const val IMAGE_PATHS = "imagePaths"
+
         private val DATE_FORMATS = listOf(
             "M/d/yyyy",
             "MM/dd/yyyy",
@@ -475,17 +617,8 @@ abstract class Roumanwu : HttpSource() {
             "yyyy/MM/dd",
         )
 
-        private val IMAGE_PATHS_REGEX = Regex(
-            """["']?imagePaths["']?\s*[:=]\s*\[(.*?)]""",
-            setOf(RegexOption.DOT_MATCHES_ALL),
-        )
-
-        private val URL_IN_ARRAY_REGEX = Regex(
-            """"(https?://[^"]+)"""",
-        )
-
-        private val IMAGE_URL_REGEX = Regex(
-            """"imageUrl"\s*:\s*"([^"]+)"""",
+        private val IMAGE_STRING_REGEX = Regex(
+            """["']((?:https?:)?(?:\\/\\/|/)[^"']+)["']""",
         )
     }
 }
