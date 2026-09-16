@@ -36,9 +36,13 @@ abstract class Roumanwu : HttpSource() {
         headers,
     )
 
-    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun popularMangaParse(response: Response): MangasPage =
+        parseMangaList(response.asJsoup())
 
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
+    override fun latestUpdatesRequest(page: Int): Request = GET(
+        "$baseUrl/home",
+        headers,
+    )
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -64,31 +68,32 @@ abstract class Roumanwu : HttpSource() {
         return parseMangaList(document)
     }
 
-override fun searchMangaRequest(
-    page: Int,
-    query: String,
-    filters: FilterList,
-): Request {
-    val pageIndex = page - 1
+    override fun searchMangaRequest(
+        page: Int,
+        query: String,
+        filters: FilterList,
+    ): Request {
+        val pageIndex = page - 1
 
-    return if (query.isNotBlank()) {
-        GET(
-            "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
-            headers,
-        )
-    } else {
-        GET(
-            if (page == 1) {
-                "$baseUrl/books"
-            } else {
-                "$baseUrl/books?page=$pageIndex"
-            },
-            headers,
-        )
+        return if (query.isNotBlank()) {
+            GET(
+                "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
+                headers,
+            )
+        } else {
+            GET(
+                if (page == 1) {
+                    "$baseUrl/books"
+                } else {
+                    "$baseUrl/books?page=$pageIndex"
+                },
+                headers,
+            )
+        }
     }
-}
 
-    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun searchMangaParse(response: Response): MangasPage =
+        parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
@@ -145,7 +150,8 @@ override fun searchMangaRequest(
         return current < total
     }
 
-    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
+    override fun mangaDetailsParse(response: Response): SManga =
+        parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -231,7 +237,11 @@ override fun searchMangaRequest(
 
             status = parseStatus(data["狀態"])
 
-            description = buildDescription(alias, title, synopsis)
+            description = buildDescription(
+                alias,
+                title,
+                synopsis,
+            )
 
             genre = genres
                 .takeIf { it.isNotEmpty() }
@@ -322,14 +332,16 @@ override fun searchMangaRequest(
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
 
-        val chapters = document
+        return document
             .select("a.site-chapter-link[href*=/books/]")
             .mapNotNull { element ->
-                val pageUrl = element
+                val rawUrl = element
                     .attr("href")
                     .trim()
                     .takeIf(String::isNotEmpty)
                     ?: return@mapNotNull null
+
+                val url = convertChapterUrlToApi(rawUrl)
 
                 val span = element.selectFirst("span")
 
@@ -340,52 +352,32 @@ override fun searchMangaRequest(
                     element.text(),
                 ) ?: return@mapNotNull null
 
-                val apiUrl = convertChapterUrlToApi(pageUrl)
-
                 SChapter.create().apply {
-                    url = apiUrl
+                    this.url = url
                     this.name = name
                 }
             }
             .distinctBy { it.url }
             .asReversed()
             .toMutableList()
+            .also { chapters ->
+                if (chapters.isNotEmpty()) {
+                    val dateText = document
+                        .selectFirst(
+                            "dl.site-book-data dt:contains(更新) + dd",
+                        )
+                        ?.text()
+                        ?.trim()
 
-        if (chapters.isNotEmpty()) {
-            val dateText = document
-                .selectFirst("dl.site-book-data dt:contains(更新) + dd")
-                ?.text()
-                ?.trim()
-
-            parseDate(dateText)
-                .takeIf { it != 0L }
-                ?.let {
-                    chapters[0].date_upload = it
+                    parseDate(dateText)
+                        .takeIf { it != 0L }
+                        ?.let {
+                            chapters[0].date_upload = it
+                        }
                 }
-        }
-
-        return chapters
+            }
     }
 
-    /**
-     * Roumanwu 的章节页面不是实际漫画数据接口。
-     *
-     * 网页章节：
-     * /books/xxxx
-     *
-     * 实际章节 API：
-     * /api/books/xxxx
-     *
-     * API 返回：
-     * {
-     *   "chapter": {
-     *     "images": [
-     *       {"src": "..."},
-     *       {"src": "..."}
-     *     ]
-     *   }
-     * }
-     */
     private fun convertChapterUrlToApi(url: String): String {
         val normalized = url
             .removePrefix(baseUrl)
@@ -405,46 +397,32 @@ override fun searchMangaRequest(
     override fun pageListRequest(chapter: SChapter): Request = GET(
         baseUrl + chapter.url,
         headers.newBuilder()
-            .add("Accept", "application/json, text/plain, */*")
-            .add("X-Requested-With", "XMLHttpRequest")
+            .add(
+                "Accept",
+                "application/json, text/plain, */*",
+            )
+            .add(
+                "X-Requested-With",
+                "XMLHttpRequest",
+            )
             .build(),
     )
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
-
         val imageUrls = parseApiImages(body)
-
-        if (imageUrls.isEmpty()) {
-            return emptyList()
-        }
 
         return imageUrls.mapIndexed { index, url ->
             Page(
-                index = index,
+                index,
                 imageUrl = url,
             )
         }
     }
 
-    override fun imageUrlParse(response: Response): String = response.request.url.toString()
+    override fun imageUrlParse(response: Response): String =
+        response.request.url.toString()
 
-    /**
-     * 只解析：
-     *
-     * chapter.images[].src
-     *
-     * 不再扫描整个 HTML 的 img 标签。
-     *
-     * 这样可以避免把：
-     * - 弹窗广告
-     * - logo
-     * - banner
-     * - 推荐漫画
-     * - 统计图片
-     *
-     * 当成漫画页面。
-     */
     private fun parseApiImages(body: String): List<String> {
         val chapterStart = findChapterObject(body)
 
@@ -452,25 +430,37 @@ override fun searchMangaRequest(
             return emptyList()
         }
 
-        val imagesStart = body.indexOf("\"images\"", chapterStart)
+        val imagesStart = body.indexOf(
+            "\"images\"",
+            chapterStart,
+        )
 
         if (imagesStart < 0) {
             return emptyList()
         }
 
-        val arrayStart = body.indexOf('[', imagesStart)
+        val arrayStart = body.indexOf(
+            '[',
+            imagesStart,
+        )
 
         if (arrayStart < 0) {
             return emptyList()
         }
 
-        val arrayEnd = findMatchingBracket(body, arrayStart)
+        val arrayEnd = findMatchingBracket(
+            body,
+            arrayStart,
+        )
 
         if (arrayEnd < 0) {
             return emptyList()
         }
 
-        val imagesJson = body.substring(arrayStart, arrayEnd + 1)
+        val imagesJson = body.substring(
+            arrayStart,
+            arrayEnd + 1,
+        )
 
         return IMAGE_SRC_REGEX
             .findAll(imagesJson)
@@ -486,60 +476,48 @@ override fun searchMangaRequest(
     }
 
     private fun findChapterObject(body: String): Int {
-        val jsonChapter = body.indexOf("\"chapter\"")
+        val chapterIndex = body.indexOf("\"chapter\"")
 
-        if (jsonChapter >= 0) {
-            return jsonChapter
+        if (chapterIndex >= 0) {
+            val objectStart = body.indexOf(
+                '{',
+                chapterIndex,
+            )
+
+            if (objectStart >= 0) {
+                return objectStart
+            }
         }
 
-        val jsChapter = body.indexOf("'chapter'")
-
-        if (jsChapter >= 0) {
-            return jsChapter
-        }
-
-        return -1
+        return body.indexOf("{\"images\"")
     }
 
     private fun findMatchingBracket(
-        body: String,
+        text: String,
         start: Int,
     ): Int {
         var depth = 0
-        var quoted = false
+        var inString = false
         var escaped = false
-        var quote = '\u0000'
 
-        for (index in start until body.length) {
-            val char = body[index]
+        for (index in start until text.length) {
+            val char = text[index]
 
-            if (escaped) {
-                escaped = false
-                continue
-            }
-
-            if (quoted && char == '\\') {
-                escaped = true
-                continue
-            }
-
-            if (quoted) {
-                if (char == quote) {
-                    quoted = false
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (char == '\\') {
+                    escaped = true
+                } else if (char == '"') {
+                    inString = false
                 }
 
                 continue
             }
 
-            if (char == '"' || char == '\'') {
-                quoted = true
-                quote = char
-                continue
-            }
-
             when (char) {
+                '"' -> inString = true
                 '[' -> depth++
-
                 ']' -> {
                     depth--
 
@@ -553,46 +531,38 @@ override fun searchMangaRequest(
         return -1
     }
 
-    private fun String.normalizeImageUrl(): String? {
-        val value = trim()
-
+    private fun String.normalizeImageUrl(): String {
         return when {
-            value.startsWith("https://") -> value
-            value.startsWith("http://") -> value
-            value.startsWith("//") -> "https:$value"
-            value.startsWith("/") -> baseUrl + value
-            else -> null
+            startsWith("//") -> "https:$this"
+            startsWith("/") -> baseUrl + this
+            else -> this
         }
     }
 
     private fun isComicImage(url: String): Boolean {
         val lower = url.lowercase(Locale.ROOT)
 
-        if (
-            lower.contains("logo") ||
-            lower.contains("avatar") ||
-            lower.contains("banner") ||
-            lower.contains("favicon") ||
-            lower.contains("popup") ||
-            lower.contains("pop-up") ||
-            lower.contains("advert") ||
-            lower.contains("adsense") ||
-            lower.contains("tracking") ||
-            lower.contains("analytics") ||
-            lower.contains("icon")
-        ) {
+        val blockedWords = listOf(
+            "logo",
+            "avatar",
+            "banner",
+            "favicon",
+            "popup",
+            "pop-up",
+            "advert",
+            "adsense",
+            "tracking",
+            "analytics",
+            "icon",
+        )
+
+        if (blockedWords.any(lower::contains)) {
             return false
         }
 
-        val path = lower
-            .substringBefore('?')
-            .substringBefore('#')
-
-        return path.endsWith(".jpg") ||
-            path.endsWith(".jpeg") ||
-            path.endsWith(".png") ||
-            path.endsWith(".webp") ||
-            path.endsWith(".gif")
+        return IMAGE_EXTENSIONS.any {
+            lower.substringBefore('?').endsWith(it)
+        }
     }
 
     private fun parseDate(value: String?): Long {
@@ -602,7 +572,11 @@ override fun searchMangaRequest(
 
         DATE_FORMATS.forEach { format ->
             try {
-                val parser = SimpleDateFormat(format, Locale.ROOT)
+                val parser = SimpleDateFormat(
+                    format,
+                    Locale.ROOT,
+                )
+
                 parser.isLenient = false
 
                 return parser.parse(value.trim())?.time ?: 0L
@@ -619,8 +593,6 @@ override fun searchMangaRequest(
 
     private fun String.unescapeUrl(): String = replace("\\/", "/")
         .replace("\\u002F", "/")
-        .replace("\\u002f", "/")
-        .replace("\\u0026", "&")
         .replace("&amp;", "&")
         .trim()
 
@@ -637,15 +609,16 @@ override fun searchMangaRequest(
             "yyyy/MM/dd",
         )
 
-        /**
-         * 匹配：
-         *
-         * "src":"https://xxxx/xxx.jpg"
-         *
-         * 只在 chapter.images 数组里面使用。
-         */
         private val IMAGE_SRC_REGEX = Regex(
             """"src"\s*:\s*"([^"]+)"""",
+        )
+
+        private val IMAGE_EXTENSIONS = listOf(
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
         )
     }
 }
