@@ -12,7 +12,6 @@ import keiyoushi.annotation.Source
 import keiyoushi.utils.asJsoup
 import okhttp3.Request
 import okhttp3.Response
-import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
 import java.text.SimpleDateFormat
@@ -21,40 +20,43 @@ import java.util.Locale
 @Source
 abstract class Roumanwu : HttpSource() {
 
+    override val name = "Roumanwu"
+
+    override val baseUrl = "https://www.rouman5.com"
+
+    override val lang = "zh"
+
     override val supportsLatest = true
 
     override val client = network.client.newBuilder()
         .addInterceptor(ScrambledImageInterceptor())
         .build()
 
-    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/books?page=${page - 1}", headers)
+    override fun headersBuilder() = super.headersBuilder()
+        .add("Referer", "$baseUrl/")
 
-    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun popularMangaRequest(page: Int): Request {
+        return GET("$baseUrl/manga?page=$page", headers)
+    }
 
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
+    override fun popularMangaParse(response: Response): MangasPage {
+        return parseMangaPage(response)
+    }
+
+    override fun popularMangaNextPageSelector(): String? {
+        return null
+    }
+
+    override fun latestUpdatesRequest(page: Int): Request {
+        return GET("$baseUrl/manga?sort=latest&page=$page", headers)
+    }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
-        val document = response.asJsoup()
-        val home = document.selectFirst("div.site-home")
+        return parseMangaPage(response)
+    }
 
-        if (home != null) {
-            val entries = home.children()
-                .filter { section ->
-                    section.selectFirst(".site-section-heading")
-                        ?.text()
-                        ?.let {
-                            it.contains("最近更新") || it.contains("最新更新")
-                        } == true
-                }
-                .flatMap(::parseEntries)
-                .distinctBy { it.url }
-
-            if (entries.isNotEmpty()) {
-                return MangasPage(entries, false)
-            }
-        }
-
-        return parseMangaList(document)
+    override fun latestUpdatesNextPageSelector(): String? {
+        return null
     }
 
     override fun searchMangaRequest(
@@ -62,296 +64,169 @@ abstract class Roumanwu : HttpSource() {
         query: String,
         filters: FilterList,
     ): Request {
-        val pageIndex = page - 1
-
-        return if (query.isNotBlank()) {
-            GET(
-                "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
-                headers,
-            )
-        } else {
-            GET("$baseUrl/books?page=$pageIndex", headers)
-        }
+        val encodedQuery = URLEncoder.encode(query, "UTF-8")
+        return GET("$baseUrl/search?q=$encodedQuery&page=$page", headers)
     }
 
-    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
-
-    private fun parseMangaList(document: Document): MangasPage = MangasPage(
-        parseEntries(document),
-        hasNextPage(document),
-    )
-
-    private fun parseEntries(container: Element): List<SManga> {
-        return container
-            .select("a.site-comic[href*=/books/]")
-            .mapNotNull { element ->
-                val url = element
-                    .attr("href")
-                    .trim()
-                    .takeIf(String::isNotEmpty)
-                    ?: return@mapNotNull null
-
-                val title = element
-                    .selectFirst("h3")
-                    ?.text()
-                    ?.trim()
-                    ?.takeIf(String::isNotEmpty)
-                    ?: return@mapNotNull null
-
-                val thumbnail = element
-                    .selectFirst("img")
-                    ?.let {
-                        firstNonEmpty(
-                            it.absUrl("src"),
-                            it.absUrl("data-src"),
-                            it.absUrl("data-original"),
-                        )
-                    }
-
-                SManga.create().apply {
-                    this.title = title
-                    this.url = url
-                    thumbnail_url = thumbnail
-                }
-            }
-            .distinctBy { it.url }
+    override fun searchMangaParse(response: Response): MangasPage {
+        return parseMangaPage(response)
     }
 
-    private fun hasNextPage(document: Document): Boolean {
-        val pagination = document
-            .selectFirst(".site-pagination-mobile")
-            ?.text()
-            ?.trim()
-            ?: return false
-
-        val parts = pagination.split("/")
-
-        if (parts.size < 2) {
-            return false
-        }
-
-        val current = parts[0].trim().toIntOrNull() ?: return false
-        val total = parts[1].trim().toIntOrNull() ?: return false
-
-        return current < total
+    override fun searchMangaNextPageSelector(): String? {
+        return null
     }
 
-    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
-
-    private fun parseMangaDetails(document: Document): SManga {
-        val info = document.selectFirst("div.site-book-info")
-
-        return if (info != null) {
-            parseNewMangaDetails(document, info)
-        } else {
-            parseLegacyMangaDetails(document)
-        }
+    override fun getFilterList(): FilterList {
+        return FilterList(
+            Filter.Header("搜索支持网站自身搜索"),
+        )
     }
 
-    private fun parseNewMangaDetails(
-        document: Document,
-        info: Element,
-    ): SManga {
-        val data = info
-            .select("dl.site-book-data dt")
-            .associate { dt ->
-                val key = dt.text().trim()
-                val value = dt.nextElementSibling()
-                    ?.text()
-                    ?.trim()
-                    .orEmpty()
+    private fun parseMangaPage(response: Response): MangasPage {
+        val document = response.asJsoup()
+        val mangas = mutableListOf<SManga>()
+        val seen = HashSet<String>()
 
-                key to value
-            }
+        val selectors = listOf(
+            "a[href*='/manga/']",
+            "a[href*='/comic/']",
+            "a[href*='/book/']",
+            ".book-item a",
+            ".comic-item a",
+            ".manga-item a",
+            ".item a",
+        )
 
-        val title = info
-            .selectFirst("h1")
-            ?.text()
-            ?.trim()
-            .orEmpty()
-            .ifEmpty {
-                document.selectFirst("h1")
-                    ?.text()
-                    ?.trim()
-                    .orEmpty()
-            }
+        for (selector in selectors) {
+            for (element in document.select(selector)) {
+                val href = element.absUrl("href").trim()
 
-        val alias = info
-            .selectFirst("p.site-book-alias")
-            ?.text()
-            ?.trim()
-
-        val synopsis = document
-            .selectFirst("div.site-book-synopsis")
-            ?.text()
-            ?.trim()
-
-        val genres = mutableListOf<String>()
-
-        data["地區"]
-            ?.trim()
-            ?.takeIf(String::isNotEmpty)
-            ?.let(genres::add)
-
-        info.selectFirst("p.site-eyebrow")
-            ?.text()
-            ?.split("/")
-            ?.map(String::trim)
-            ?.filter(String::isNotEmpty)
-            ?.forEach { genre ->
-                if (genre !in genres) {
-                    genres.add(genre)
-                }
-            }
-
-        return SManga.create().apply {
-            this.title = title
-
-            thumbnail_url = document
-                .selectFirst("img.site-detail-cover")
-                ?.let {
-                    firstNonEmpty(
-                        it.absUrl("src"),
-                        it.absUrl("data-src"),
-                        it.absUrl("data-original"),
-                    )
+                if (href.isBlank() || !seen.add(href)) {
+                    continue
                 }
 
-            author = data["作者"]
-                ?.takeIf(String::isNotEmpty)
+                val title = firstNonEmpty(
+                    element.attr("title"),
+                    element.selectFirst("img")?.attr("alt"),
+                    element.text(),
+                ) ?: continue
 
-            status = parseStatus(data["狀態"])
+                if (title.isBlank()) {
+                    continue
+                }
 
-            description = buildDescription(alias, title, synopsis)
-
-            genre = genres
-                .takeIf { it.isNotEmpty() }
-                ?.joinToString(", ")
-        }
-    }
-
-    private fun parseLegacyMangaDetails(document: Document): SManga {
-        val title = document
-            .selectFirst("h1")
-            ?.text()
-            ?.trim()
-            .orEmpty()
-
-        val thumbnail = document
-            .selectFirst("div.basis-2\\/5 img")
-            ?.let {
-                firstNonEmpty(
-                    it.absUrl("src"),
-                    it.absUrl("data-src"),
-                    it.absUrl("data-original"),
+                mangas.add(
+                    SManga.create().apply {
+                        url = href.removePrefix(baseUrl)
+                        this.title = title
+                        thumbnail_url = element.selectFirst("img")
+                            ?.absUrl("src")
+                            ?.takeIf(::isValidImageUrl)
+                    },
                 )
             }
+        }
 
-        val description = document
-            .selectFirst(
-                "div.site-book-synopsis, p:contains(簡介:), p:contains(简介:)",
-            )
-            ?.text()
-            ?.replaceFirst(
-                Regex("^簡介\\s*[:：]?\\s*"),
-                "",
-            )
-            ?.replaceFirst(
-                Regex("^简介\\s*[:：]?\\s*"),
-                "",
-            )
-            ?.trim()
+        return MangasPage(
+            mangas,
+            hasNextPage = false,
+        )
+    }
 
-        val author = document
-            .select("dt")
-            .firstOrNull {
-                it.text().trim().startsWith("作者")
-            }
-            ?.nextElementSibling()
-            ?.text()
-            ?.trim()
+    override fun mangaDetailsRequest(manga: SManga): Request {
+        return GET(baseUrl + manga.url, headers)
+    }
+
+    override fun mangaDetailsParse(response: Response): SManga {
+        val document = response.asJsoup()
 
         return SManga.create().apply {
-            this.title = title
-            thumbnail_url = thumbnail
-            this.author = author
-            this.description = description
-            status = SManga.UNKNOWN
+            title = firstNonEmpty(
+                document.selectFirst("h1")?.text(),
+                document.selectFirst("h2")?.text(),
+                document.selectFirst("meta[property=og:title]")?.attr("content"),
+            ) ?: ""
+
+            thumbnail_url = firstNonEmpty(
+                document.selectFirst("meta[property=og:image]")?.attr("content"),
+                document.selectFirst("img")?.absUrl("src"),
+            )?.takeIf(::isValidImageUrl)
+
+            author = firstNonEmpty(
+                document.selectFirst(".author")?.text(),
+                document.selectFirst("[class*=author]")?.text(),
+            )
+
+            artist = author
+
+            description = firstNonEmpty(
+                document.selectFirst(".description")?.text(),
+                document.selectFirst("[class*=description]")?.text(),
+                document.selectFirst(".intro")?.text(),
+                document.selectFirst("[class*=intro]")?.text(),
+            )
+
+            status = parseStatus(
+                firstNonEmpty(
+                    document.selectFirst(".status")?.text(),
+                    document.selectFirst("[class*=status]")?.text(),
+                ),
+            )
         }
     }
 
-    private fun parseStatus(value: String?): Int = when {
-        value?.contains("連載中") == true -> SManga.ONGOING
-        value?.contains("連載") == true -> SManga.ONGOING
-        value?.contains("已完結") == true -> SManga.COMPLETED
-        value?.contains("完結") == true -> SManga.COMPLETED
-        else -> SManga.UNKNOWN
-    }
-
-    private fun buildDescription(
-        alias: String?,
-        title: String,
-        synopsis: String?,
-    ): String? {
-        val parts = mutableListOf<String>()
-
-        if (!alias.isNullOrBlank() && alias != title) {
-            parts.add("別名：$alias")
-        }
-
-        if (!synopsis.isNullOrBlank()) {
-            parts.add(synopsis)
-        }
-
-        return parts
-            .takeIf { it.isNotEmpty() }
-            ?.joinToString("\n\n")
+    override fun chapterListRequest(manga: SManga): Request {
+        return GET(baseUrl + manga.url, headers)
     }
 
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
+        val chapters = mutableListOf<SChapter>()
+        val seen = HashSet<String>()
 
-        val chapters = document
-            .select("a.site-chapter-link[href*=/books/]")
-            .mapNotNull { element ->
-                val url = element
-                    .attr("href")
-                    .trim()
-                    .takeIf(String::isNotEmpty)
-                    ?: return@mapNotNull null
+        val selectors = listOf(
+            "a[href*='/chapter/']",
+            "a[href*='/read/']",
+            "a[href*='/comic/']",
+            "a[href*='/manga/']",
+            ".chapter-list a",
+            ".chapters a",
+            ".chapter a",
+        )
 
-                val span = element.selectFirst("span")
+        for (selector in selectors) {
+            for (element in document.select(selector)) {
+                val href = element.absUrl("href").trim()
+
+                if (href.isBlank() || !seen.add(href)) {
+                    continue
+                }
 
                 val name = firstNonEmpty(
-                    span?.attr("title"),
-                    span?.text(),
                     element.attr("title"),
                     element.text(),
-                ) ?: return@mapNotNull null
+                ) ?: continue
 
-                SChapter.create().apply {
-                    this.url = url
-                    this.name = name
+                if (name.isBlank()) {
+                    continue
                 }
+
+                chapters.add(
+                    SChapter.create().apply {
+                        url = href.removePrefix(baseUrl)
+                        this.name = name
+                        chapter_number = parseChapterNumber(name)
+                        date_upload = parseDate(element)
+                    },
+                )
             }
-            .distinctBy { it.url }
-            .asReversed()
-            .toMutableList()
-
-        if (chapters.isNotEmpty()) {
-            val dateText = document
-                .selectFirst("dl.site-book-data dt:contains(更新) + dd")
-                ?.text()
-                ?.trim()
-
-            parseDate(dateText)
-                .takeIf { it != 0L }
-                ?.let {
-                    chapters[0].date_upload = it
-                }
         }
 
-        return chapters
+        if (chapters.isEmpty()) {
+            return parseChapterData(response.body.string())
+        }
+
+        return chapters.sortedByDescending { it.chapter_number }
     }
 
     override fun pageListRequest(chapter: SChapter): Request = super.pageListRequest(chapter)
@@ -371,127 +246,112 @@ abstract class Roumanwu : HttpSource() {
     }
 
     private fun parseChapterImages(body: String): List<String> {
-        val result = mutableListOf<String>()
+        val results = mutableListOf<String>()
         var searchStart = 0
 
         while (searchStart < body.length) {
-            val marker = findImagePathsMarker(body, searchStart)
+            val markerStart = findImagePathsMarker(body, searchStart)
 
-            if (marker < 0) {
+            if (markerStart < 0) {
                 break
             }
 
-            val arrayStart = findArrayStart(body, marker)
+            val arrayStart = findArrayStart(body, markerStart)
 
             if (arrayStart < 0) {
-                searchStart = marker + IMAGE_PATHS.length
+                searchStart = markerStart + IMAGE_PATHS_KEY.length
                 continue
             }
 
             val arrayEnd = findArrayEnd(body, arrayStart)
 
             if (arrayEnd < 0) {
-                searchStart = arrayStart + 1
+                searchStart = markerStart + IMAGE_PATHS_KEY.length
                 continue
             }
 
-            val arrayContent = body.substring(
-                arrayStart + 1,
-                arrayEnd,
-            )
+            val array = body.substring(arrayStart + 1, arrayEnd)
 
-            extractUrls(arrayContent)
+            extractUrls(array)
                 .mapNotNull(::normalizeImageUrl)
                 .filter(::isComicImageUrl)
                 .forEach { url ->
-                    if (url !in result) {
-                        result.add(url)
+                    if (!results.contains(url)) {
+                        results.add(url)
                     }
                 }
 
             searchStart = arrayEnd + 1
         }
 
-        return result
+        return results
     }
 
-    private fun findImagePathsMarker(
-        body: String,
-        start: Int,
-    ): Int {
-        val candidates = listOf(
+    private fun findImagePathsMarker(body: String, start: Int): Int {
+        val markers = listOf(
             "\"imagePaths\"",
             "'imagePaths'",
             "imagePaths:",
             "imagePaths=",
         )
 
-        return candidates
+        return markers
             .map { body.indexOf(it, start) }
             .filter { it >= 0 }
-            .minOrNull()
-            ?: -1
+            .minOrNull() ?: -1
     }
 
-    private fun findArrayStart(
-        body: String,
-        marker: Int,
-    ): Int {
-        val colon = body.indexOf(':', marker)
-        val equals = body.indexOf('=', marker)
+    private fun findArrayStart(body: String, markerStart: Int): Int {
+        var index = markerStart
 
-        val separator = when {
-            colon >= 0 && equals >= 0 -> minOf(colon, equals)
-            colon >= 0 -> colon
-            equals >= 0 -> equals
-            else -> return -1
-        }
-
-        var index = separator + 1
-
-        while (index < body.length) {
+        while (index < body.length && index < markerStart + 500) {
             when (body[index]) {
-                ' ', '\t', '\n', '\r' -> index++
                 '[' -> return index
-                else -> return -1
+                ':', '=' -> Unit
             }
+
+            index++
         }
 
         return -1
     }
 
-    private fun findArrayEnd(
-        body: String,
-        start: Int,
-    ): Int {
+    private fun findArrayEnd(body: String, start: Int): Int {
         var depth = 0
         var quoted = false
+        var quote = '\u0000'
         var escaped = false
 
         for (index in start until body.length) {
             val char = body[index]
 
+            if (escaped) {
+                escaped = false
+                continue
+            }
+
+            if (quoted && char == '\\') {
+                escaped = true
+                continue
+            }
+
             if (quoted) {
-                if (escaped) {
-                    escaped = false
-                    continue
-                }
-
-                if (char == '\\') {
-                    escaped = true
-                    continue
-                }
-
-                if (char == '"') {
+                if (char == quote) {
                     quoted = false
                 }
 
                 continue
             }
 
+            if (char == '"' || char == '\'') {
+                quoted = true
+                quote = char
+                continue
+            }
+
             when (char) {
-                '"' -> quoted = true
                 '[' -> depth++
+
                 ']' -> {
                     depth--
 
@@ -505,23 +365,22 @@ abstract class Roumanwu : HttpSource() {
         return -1
     }
 
-    private fun extractUrls(array: String): List<String> {
-        return IMAGE_STRING_REGEX
-            .findAll(array)
-            .mapNotNull { match ->
-                match.groupValues
-                    .getOrNull(1)
-                    ?.unescapeUrl()
-                    ?.takeIf(String::isNotBlank)
-            }
-            .toList()
-    }
+    private fun extractUrls(array: String): List<String> = IMAGE_STRING_REGEX
+        .findAll(array)
+        .mapNotNull { match ->
+            match.groupValues
+                .getOrNull(1)
+                ?.unescapeUrl()
+                ?.takeIf(String::isNotBlank)
+        }
+        .toList()
 
     private fun normalizeImageUrl(value: String): String? {
         val url = value
             .trim()
             .replace("\\/", "/")
             .replace("\\u002F", "/")
+            .replace("\\u002f", "/")
             .replace("&amp;", "&")
             .replace("\\u0026", "&")
             .trim('"', '\'')
@@ -536,18 +395,9 @@ abstract class Roumanwu : HttpSource() {
     }
 
     private fun isComicImageUrl(url: String): Boolean {
-        val normalized = url
-            .lowercase(Locale.ROOT)
-            .substringBefore('?')
-            .substringBefore('#')
+        val lower = url.lowercase(Locale.ROOT)
 
-        if (!normalized.startsWith("http://") &&
-            !normalized.startsWith("https://")
-        ) {
-            return false
-        }
-
-        val blockedKeywords = listOf(
+        val blockedWords = listOf(
             "loading",
             "favicon",
             "logo",
@@ -563,61 +413,144 @@ abstract class Roumanwu : HttpSource() {
             "icon",
         )
 
-        if (blockedKeywords.any(normalized::contains)) {
+        if (blockedWords.any(lower::contains)) {
             return false
         }
 
-        return normalized.endsWith(".jpg") ||
-            normalized.endsWith(".jpeg") ||
-            normalized.endsWith(".png") ||
-            normalized.endsWith(".webp") ||
-            normalized.endsWith(".gif")
+        val path = lower
+            .substringBefore('?')
+            .substringBefore('#')
+
+        return path.endsWith(".jpg") ||
+            path.endsWith(".jpeg") ||
+            path.endsWith(".png") ||
+            path.endsWith(".webp") ||
+            path.endsWith(".gif")
     }
 
-    private fun parseDate(value: String?): Long {
-        if (value.isNullOrBlank()) {
-            return 0L
+    private fun isValidImageUrl(url: String?): Boolean {
+        if (url.isNullOrBlank()) {
+            return false
         }
 
-        DATE_FORMATS.forEach { format ->
-            try {
-                val parser = SimpleDateFormat(format, Locale.ROOT)
-                parser.isLenient = false
+        return url.startsWith("http://") ||
+            url.startsWith("https://") ||
+            url.startsWith("//")
+    }
 
-                return parser.parse(value.trim())?.time ?: 0L
+    private fun parseChapterData(body: String): List<SChapter> {
+        val result = mutableListOf<SChapter>()
+
+        val regex = Regex(
+            """["']([^"']*(?:chapter|chap)[^"']*)["']\s*:\s*["']([^"']+)["']""",
+            RegexOption.IGNORE_CASE,
+        )
+
+        val seen = HashSet<String>()
+
+        for (match in regex.findAll(body)) {
+            val name = match.groupValues
+                .getOrNull(1)
+                ?.trim()
+                ?: continue
+
+            val url = match.groupValues
+                .getOrNull(2)
+                ?.trim()
+                ?: continue
+
+            if (url.isBlank() || !seen.add(url)) {
+                continue
+            }
+
+            result.add(
+                SChapter.create().apply {
+                    this.url = normalizeChapterUrl(url)
+                    this.name = name
+                    chapter_number = parseChapterNumber(name)
+                },
+            )
+        }
+
+        return result.sortedByDescending { it.chapter_number }
+    }
+
+    private fun normalizeChapterUrl(url: String): String {
+        return when {
+            url.startsWith("http://") -> url.removePrefix(baseUrl)
+            url.startsWith("https://") -> url.removePrefix(baseUrl)
+            url.startsWith("/") -> url
+            else -> "/$url"
+        }
+    }
+
+    private fun parseChapterNumber(name: String): Float {
+        val match = Regex(
+            """(?:第\s*)?(\d+(?:\.\d+)?)""",
+        ).find(name)
+
+        return match?.groupValues
+            ?.getOrNull(1)
+            ?.toFloatOrNull()
+            ?: -1f
+    }
+
+    private fun parseDate(element: Element): Long {
+        val value = firstNonEmpty(
+            element.attr("data-date"),
+            element.attr("data-time"),
+            element.selectFirst("time")?.attr("datetime"),
+            element.selectFirst("time")?.text(),
+        ) ?: return 0L
+
+        val formats = listOf(
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm",
+            "yyyy-MM-dd",
+            "yyyy/MM/dd HH:mm:ss",
+            "yyyy/MM/dd HH:mm",
+            "yyyy/MM/dd",
+        )
+
+        for (format in formats) {
+            try {
+                return SimpleDateFormat(
+                    format,
+                    Locale.getDefault(),
+                ).parse(value)?.time ?: 0L
             } catch (_: Exception) {
+                continue
             }
         }
 
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? = values.firstOrNull { !it.isNullOrBlank() }?.trim()
+    private fun parseStatus(value: String?): Int = when {
+        value.isNullOrBlank() -> SManga.UNKNOWN
+        value.contains("完结") -> SManga.COMPLETED
+        value.contains("连载") -> SManga.ONGOING
+        value.contains("停更") -> SManga.ON_HIATUS
+        value.contains("休刊") -> SManga.ON_HIATUS
+        value.contains("腰斩") -> SManga.CANCELLED
+        else -> SManga.UNKNOWN
+    }
+
+    private fun firstNonEmpty(vararg values: String?): String? = values
+        .firstOrNull { !it.isNullOrBlank() }
+        ?.trim()
 
     private fun String.unescapeUrl(): String = replace("\\/", "/")
         .replace("\\u002F", "/")
+        .replace("\\u002f", "/")
         .replace("&amp;", "&")
         .replace("\\u0026", "&")
         .trim()
 
-    override fun imageUrlParse(response: Response): String = response.request.url.toString()
+    private companion object {
+        const val IMAGE_PATHS_KEY = "imagePaths"
 
-    override fun getFilterList(): FilterList = FilterList(
-        Filter.Header("搜尋漫畫時不使用篩選條件"),
-    )
-
-    companion object {
-        private const val IMAGE_PATHS = "imagePaths"
-
-        private val DATE_FORMATS = listOf(
-            "M/d/yyyy",
-            "MM/dd/yyyy",
-            "M/d/yyyy HH:mm",
-            "yyyy-MM-dd",
-            "yyyy/MM/dd",
-        )
-
-        private val IMAGE_STRING_REGEX = Regex(
+        val IMAGE_STRING_REGEX = Regex(
             """["']((?:https?:)?(?:\\/\\/|/)[^"']+)["']""",
         )
     }
