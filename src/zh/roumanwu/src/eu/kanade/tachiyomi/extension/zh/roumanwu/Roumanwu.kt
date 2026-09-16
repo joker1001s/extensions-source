@@ -27,15 +27,11 @@ abstract class Roumanwu : HttpSource() {
         .addInterceptor(ScrambledImageInterceptor())
         .build()
 
-    override fun popularMangaRequest(page: Int): Request =
-        GET("$baseUrl/books?page=${page - 1}", headers)
+    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/books?page=${page - 1}", headers)
 
-    override fun popularMangaParse(response: Response): MangasPage {
-        return parseMangaList(response.asJsoup())
-    }
+    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
-    override fun latestUpdatesRequest(page: Int): Request =
-        GET("$baseUrl/home", headers)
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -78,9 +74,7 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        return parseMangaList(response.asJsoup())
-    }
+    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
@@ -139,9 +133,7 @@ abstract class Roumanwu : HttpSource() {
         return current < total
     }
 
-    override fun mangaDetailsParse(response: Response): SManga {
-        return parseMangaDetails(response.asJsoup())
-    }
+    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -234,9 +226,7 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseLegacyMangaDetails(
-        document: Document,
-    ): SManga {
+    private fun parseLegacyMangaDetails(document: Document): SManga {
         val title = document
             .selectFirst("h1")
             ?.text()
@@ -286,14 +276,12 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseStatus(value: String?): Int {
-        return when {
-            value?.contains("連載中") == true -> SManga.ONGOING
-            value?.contains("連載") == true -> SManga.ONGOING
-            value?.contains("已完結") == true -> SManga.COMPLETED
-            value?.contains("完結") == true -> SManga.COMPLETED
-            else -> SManga.UNKNOWN
-        }
+    private fun parseStatus(value: String?): Int = when {
+        value?.contains("連載中") == true -> SManga.ONGOING
+        value?.contains("連載") == true -> SManga.ONGOING
+        value?.contains("已完結") == true -> SManga.COMPLETED
+        value?.contains("完結") == true -> SManga.COMPLETED
+        else -> SManga.UNKNOWN
     }
 
     private fun buildDescription(
@@ -452,24 +440,17 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? {
-        return values
-            .firstOrNull { !it.isNullOrBlank() }
-            ?.trim()
-    }
+    private fun firstNonEmpty(vararg values: String?): String? =
+        values.firstOrNull { !it.isNullOrBlank() }?.trim()
 
-    private fun String.unescapeUrl(): String {
-        return replace("\\/", "/")
-            .replace("\\u002F", "/")
-            .replace("&amp;", "&")
-            .trim()
-    }
+    private fun String.unescapeUrl(): String = replace("\\/", "/")
+        .replace("\\u002F", "/")
+        .replace("&amp;", "&")
+        .trim()
 
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            Filter.Header("搜尋漫畫時不使用篩選條件"),
-        )
-    }
+    override fun getFilterList(): FilterList = FilterList(
+        Filter.Header("搜尋漫畫時不使用篩選條件"),
+    )
 
     companion object {
         private val DATE_FORMATS = listOf(
