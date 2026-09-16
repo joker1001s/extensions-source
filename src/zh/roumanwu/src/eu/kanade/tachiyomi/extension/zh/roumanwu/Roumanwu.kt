@@ -383,7 +383,7 @@ abstract class Roumanwu : HttpSource() {
             }
         }
 
-        return body.asJsoup()
+        return body.asJsoup(baseUrl)
             .select("img")
             .mapNotNull { image ->
                 firstNonEmpty(
@@ -391,7 +391,7 @@ abstract class Roumanwu : HttpSource() {
                     image.absUrl("data-src"),
                     image.absUrl("data-original"),
                 )
-            }
+            }    
             .filter { url ->
                 url.startsWith("http://") || url.startsWith("https://")
             }
@@ -400,6 +400,8 @@ abstract class Roumanwu : HttpSource() {
                 Page(index, imageUrl = url)
             }
     }
+
+    override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
     private fun parseImagePaths(body: String): List<String> {
         val array = IMAGE_PATHS_REGEX
