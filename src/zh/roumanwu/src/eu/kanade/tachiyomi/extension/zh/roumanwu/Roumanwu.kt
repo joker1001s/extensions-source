@@ -388,15 +388,13 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun pageListRequest(chapter: SChapter): Request {
-        return GET(
-            baseUrl + chapter.url,
-            headers.newBuilder()
-                .add("Accept", "application/json, text/plain, */*")
-                .add("X-Requested-With", "XMLHttpRequest")
-                .build(),
-        )
-    }
+    override fun pageListRequest(chapter: SChapter): Request = GET(
+        baseUrl + chapter.url,
+        headers.newBuilder()
+            .add("Accept", "application/json, text/plain, */*")
+            .add("X-Requested-With", "XMLHttpRequest")
+            .build(),
+    )
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
