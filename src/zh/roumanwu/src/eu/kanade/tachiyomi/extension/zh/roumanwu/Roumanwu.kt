@@ -27,7 +27,14 @@ abstract class Roumanwu : HttpSource() {
         .addInterceptor(ScrambledImageInterceptor())
         .build()
 
-    override fun popularMangaRequest(page: Int): Request = GET("$baseUrl/books?page=${page - 1}", headers)
+    override fun popularMangaRequest(page: Int): Request = GET(
+        if (page == 1) {
+            "$baseUrl/books"
+        } else {
+            "$baseUrl/books?page=${page - 1}"
+        },
+        headers,
+    )
 
     override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
@@ -63,14 +70,21 @@ abstract class Roumanwu : HttpSource() {
         filters: FilterList,
     ): Request {
         val pageIndex = page - 1
-
+    
         return if (query.isNotBlank()) {
             GET(
                 "$baseUrl/search?term=${URLEncoder.encode(query, "UTF-8")}&page=$pageIndex",
                 headers,
             )
         } else {
-            GET("$baseUrl/books?page=$pageIndex", headers)
+            GET(
+                if (page == 1) {
+                    "$baseUrl/books"
+                } else {
+                    "$baseUrl/books?page=$pageIndex"
+                },
+                headers,
+            )
         }
     }
 
