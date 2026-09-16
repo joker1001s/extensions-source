@@ -36,8 +36,7 @@ abstract class Roumanwu : HttpSource() {
         headers,
     )
 
-    override fun popularMangaParse(response: Response): MangasPage =
-        parseMangaList(response.asJsoup())
+    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     override fun latestUpdatesRequest(page: Int): Request = GET(
         "$baseUrl/home",
@@ -92,8 +91,7 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage =
-        parseMangaList(response.asJsoup())
+    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
@@ -150,8 +148,7 @@ abstract class Roumanwu : HttpSource() {
         return current < total
     }
 
-    override fun mangaDetailsParse(response: Response): SManga =
-        parseMangaDetails(response.asJsoup())
+    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -237,11 +234,7 @@ abstract class Roumanwu : HttpSource() {
 
             status = parseStatus(data["狀態"])
 
-            description = buildDescription(
-                alias,
-                title,
-                synopsis,
-            )
+            description = buildDescription(alias, title, synopsis)
 
             genre = genres
                 .takeIf { it.isNotEmpty() }
@@ -389,7 +382,6 @@ abstract class Roumanwu : HttpSource() {
                 "/books/",
                 "/api/books/",
             )
-
             else -> normalized
         }
     }
@@ -413,15 +405,11 @@ abstract class Roumanwu : HttpSource() {
         val imageUrls = parseApiImages(body)
 
         return imageUrls.mapIndexed { index, url ->
-            Page(
-                index,
-                imageUrl = url,
-            )
+            Page(index, imageUrl = url)
         }
     }
 
-    override fun imageUrlParse(response: Response): String =
-        response.request.url.toString()
+    override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
     private fun parseApiImages(body: String): List<String> {
         val chapterStart = findChapterObject(body)
@@ -531,12 +519,10 @@ abstract class Roumanwu : HttpSource() {
         return -1
     }
 
-    private fun String.normalizeImageUrl(): String {
-        return when {
-            startsWith("//") -> "https:$this"
-            startsWith("/") -> baseUrl + this
-            else -> this
-        }
+    private fun String.normalizeImageUrl(): String = when {
+        startsWith("//") -> "https:$this"
+        startsWith("/") -> baseUrl + this
+        else -> this
     }
 
     private fun isComicImage(url: String): Boolean {
