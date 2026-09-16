@@ -33,13 +33,10 @@ abstract class Roumanwu : HttpSource() {
 
     override fun popularMangaParse(response: Response): MangasPage = parseMangaPage(response)
 
-    override fun popularMangaNextPageSelector(): String? = null
-
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/manga?sort=latest&page=$page", headers)
+    override fun latestUpdatesRequest(page: Int): Request =
+        GET("$baseUrl/manga?sort=latest&page=$page", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage = parseMangaPage(response)
-
-    override fun latestUpdatesNextPageSelector(): String? = null
 
     override fun searchMangaRequest(
         page: Int,
@@ -51,8 +48,6 @@ abstract class Roumanwu : HttpSource() {
     }
 
     override fun searchMangaParse(response: Response): MangasPage = parseMangaPage(response)
-
-    override fun searchMangaNextPageSelector(): String? = null
 
     override fun getFilterList(): FilterList = FilterList(
         Filter.Header("搜索支持网站自身搜索"),
@@ -216,6 +211,8 @@ abstract class Roumanwu : HttpSource() {
             )
         }
     }
+
+    override fun imageUrlParse(response: Response): String = throw UnsupportedOperationException()
 
     private fun parseChapterImages(body: String): List<String> {
         val results = mutableListOf<String>()
