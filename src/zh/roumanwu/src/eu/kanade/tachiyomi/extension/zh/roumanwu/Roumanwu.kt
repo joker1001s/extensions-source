@@ -375,21 +375,34 @@ abstract class Roumanwu : HttpSource() {
     }
 
     // Chapter pages
-    override fun pageListRequest(chapter: SChapter): Request = super
-        .pageListRequest(chapter)
-        .newBuilder()
-        .addHeader("rsc", "1")
-        .build()
+    override fun pageListRequest(chapter: SChapter): Request = GET(
+        if (chapter.url.startsWith("http")) {
+            chapter.url
+        } else {
+            baseUrl + chapter.url
+        },
+        headers.newBuilder()
+            .addHeader("Referer", "$baseUrl/")
+            .addHeader(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
+            .build(),
+    )
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
 
         return IMAGE_URL_REGEX
             .findAll(body)
-            .mapIndexed { index, match ->
+            .map { it.groupValues[1] }
+            .filter { it.contains("kelv47.xyz") }
+            .filter { it.endsWith(".webp") }
+            .distinct()
+            .mapIndexed { index, url ->
                 Page(
                     index,
-                    imageUrl = match.groupValues[1],
+                    imageUrl = url,
                 )
             }
             .toList()
@@ -437,7 +450,7 @@ abstract class Roumanwu : HttpSource() {
         )
 
         private val IMAGE_URL_REGEX = Regex(
-            """"imageUrl":"([^"]+)"""",
+            """"(https?://[^"]+\.webp)"""",
         )
     }
 }
