@@ -381,13 +381,7 @@ abstract class Roumanwu : HttpSource() {
         } else {
             baseUrl + chapter.url
         },
-        headers.newBuilder()
-            .addHeader("Referer", "$baseUrl/")
-            .addHeader(
-                "Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .build(),
+        headers,
     )
 
     override fun pageListParse(response: Response): List<Page> {
