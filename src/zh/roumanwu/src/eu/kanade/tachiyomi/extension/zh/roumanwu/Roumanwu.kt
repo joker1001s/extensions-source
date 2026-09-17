@@ -387,22 +387,69 @@ abstract class Roumanwu : HttpSource() {
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
 
-        return IMAGE_URL_REGEX
-            .findAll(body)
+        val urls = LinkedHashSet<String>()
+
+        /*
+         * Roumanwu 当前章节页面的数据格式类似：
+         *
+         * imagePaths: $R[27] = [
+         *     "https://v1.kelv47.xyz/....../00001.webp",
+         *     "https://v1.kelv47.xyz/....../00002.webp"
+         * ]
+         *
+         * 第一层：直接匹配完整的 HTTPS webp URL。
+         */
+        IMAGE_URL_REGEX.findAll(body)
             .map { it.groupValues[1] }
+            .forEach { url ->
+                urls.add(
+                    normalizeImageUrl(url),
+                )
+            }
+
+        /*
+         * 第二层：兼容网页把 URL 写成 escaped JSON 的情况：
+         *
+         * "https:\/\/v1.kelv47.xyz\/.....\/00001.webp"
+         */
+        ESCAPED_IMAGE_URL_REGEX.findAll(body)
+            .map { it.groupValues[1] }
+            .forEach { url ->
+                urls.add(
+                    normalizeImageUrl(url),
+                )
+            }
+
+        /*
+         * 第三层：如果上面的格式发生变化，
+         * 直接寻找 kelv47.xyz 后面的 webp URL。
+         */
+        LOOSE_IMAGE_URL_REGEX.findAll(body)
+            .map { it.groupValues[1] }
+            .forEach { url ->
+                urls.add(
+                    normalizeImageUrl(url),
+                )
+            }
+
+        return urls
             .filter { it.contains("kelv47.xyz") }
-            .filter { it.endsWith(".webp") }
-            .distinct()
+            .filter { it.contains(".webp") }
             .mapIndexed { index, url ->
                 Page(
                     index,
                     imageUrl = url,
                 )
             }
-            .toList()
     }
 
     override fun imageUrlParse(response: Response): String = response.request.url.toString()
+
+    private fun normalizeImageUrl(url: String): String = url
+        .replace("\\/", "/")
+        .replace("\\u0026", "&")
+        .replace("&amp;", "&")
+        .trim()
 
     // Date
     private fun parseDate(value: String?): Long {
@@ -444,7 +491,15 @@ abstract class Roumanwu : HttpSource() {
         )
 
         private val IMAGE_URL_REGEX = Regex(
-            """"(https?://[^"]+\.webp)"""",
+            """"(https?://[^"]+\.webp[^"]*)"""",
+        )
+
+        private val ESCAPED_IMAGE_URL_REGEX = Regex(
+            """"(https:\\/\\/[^"]+?\.webp[^"]*)"""",
+        )
+
+        private val LOOSE_IMAGE_URL_REGEX = Regex(
+            """(https?://[^"'\\\s]+kelv47\.xyz[^"'\\\s]+?\.webp[^"'\\\s]*)""",
         )
     }
 }
