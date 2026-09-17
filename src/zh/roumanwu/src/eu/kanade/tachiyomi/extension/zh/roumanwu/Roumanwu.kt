@@ -28,25 +28,19 @@ abstract class Roumanwu : HttpSource() {
         .build()
 
     // Popular
-    override fun popularMangaRequest(page: Int): Request {
-        return GET(
-            if (page == 1) {
-                "$baseUrl/books"
-            } else {
-                "$baseUrl/books?page=${page - 1}"
-            },
-            headers,
-        )
-    }
+    override fun popularMangaRequest(page: Int): Request = GET(
+        if (page == 1) {
+            "$baseUrl/books"
+        } else {
+            "$baseUrl/books?page=${page - 1}"
+        },
+        headers,
+    )
 
-    override fun popularMangaParse(response: Response): MangasPage {
-        return parseMangaList(response.asJsoup())
-    }
+    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     // Latest
-    override fun latestUpdatesRequest(page: Int): Request {
-        return GET("$baseUrl/home", headers)
-    }
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -97,47 +91,43 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage {
-        return parseMangaList(response.asJsoup())
-    }
+    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
         return MangasPage(entries, hasNextPage(document))
     }
 
-    private fun parseEntries(container: Element): List<SManga> {
-        return container
-            .select("a.site-comic[href*=/books/]")
-            .mapNotNull { element ->
-                val url = element.attr("href")
-                    .trim()
-                    .takeIf(String::isNotEmpty)
-                    ?: return@mapNotNull null
+    private fun parseEntries(container: Element): List<SManga> = container
+        .select("a.site-comic[href*=/books/]")
+        .mapNotNull { element ->
+            val url = element.attr("href")
+                .trim()
+                .takeIf(String::isNotEmpty)
+                ?: return@mapNotNull null
 
-                val title = element
-                    .selectFirst("h3")
-                    ?.text()
-                    ?.trim()
-                    ?.takeIf(String::isNotEmpty)
-                    ?: return@mapNotNull null
+            val title = element
+                .selectFirst("h3")
+                ?.text()
+                ?.trim()
+                ?.takeIf(String::isNotEmpty)
+                ?: return@mapNotNull null
 
-                val thumbnail = element.selectFirst("img")?.let {
-                    firstNonEmpty(
-                        it.absUrl("src"),
-                        it.absUrl("data-src"),
-                        it.absUrl("data-original"),
-                    )
-                }
-
-                SManga.create().apply {
-                    this.title = title
-                    this.url = url
-                    thumbnail_url = thumbnail
-                }
+            val thumbnail = element.selectFirst("img")?.let {
+                firstNonEmpty(
+                    it.absUrl("src"),
+                    it.absUrl("data-src"),
+                    it.absUrl("data-original"),
+                )
             }
-            .distinctBy { it.url }
-    }
+
+            SManga.create().apply {
+                this.title = title
+                this.url = url
+                thumbnail_url = thumbnail
+            }
+        }
+        .distinctBy { it.url }
 
     private fun hasNextPage(document: Document): Boolean {
         val pagination = document
@@ -159,9 +149,7 @@ abstract class Roumanwu : HttpSource() {
     }
 
     // Manga details
-    override fun mangaDetailsParse(response: Response): SManga {
-        return parseMangaDetails(response.asJsoup())
-    }
+    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -309,14 +297,12 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseStatus(value: String?): Int {
-        return when {
-            value?.contains("連載中") == true -> SManga.ONGOING
-            value?.contains("連載") == true -> SManga.ONGOING
-            value?.contains("已完結") == true -> SManga.COMPLETED
-            value?.contains("完結") == true -> SManga.COMPLETED
-            else -> SManga.UNKNOWN
-        }
+    private fun parseStatus(value: String?): Int = when {
+        value?.contains("連載中") == true -> SManga.ONGOING
+        value?.contains("連載") == true -> SManga.ONGOING
+        value?.contains("已完結") == true -> SManga.COMPLETED
+        value?.contains("完結") == true -> SManga.COMPLETED
+        else -> SManga.UNKNOWN
     }
 
     private fun buildDescription(
@@ -389,12 +375,11 @@ abstract class Roumanwu : HttpSource() {
     }
 
     // Chapter pages
-    override fun pageListRequest(chapter: SChapter): Request {
-        return super.pageListRequest(chapter)
-            .newBuilder()
-            .addHeader("rsc", "1")
-            .build()
-    }
+    override fun pageListRequest(chapter: SChapter): Request = super
+        .pageListRequest(chapter)
+        .newBuilder()
+        .addHeader("rsc", "1")
+        .build()
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
@@ -410,9 +395,7 @@ abstract class Roumanwu : HttpSource() {
             .toList()
     }
 
-    override fun imageUrlParse(response: Response): String {
-        return response.request.url.toString()
-    }
+    override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
     // Date
     private fun parseDate(value: String?): Long {
@@ -436,17 +419,13 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? {
-        return values
-            .firstOrNull { !it.isNullOrBlank() }
-            ?.trim()
-    }
+    private fun firstNonEmpty(vararg values: String?): String? = values
+        .firstOrNull { !it.isNullOrBlank() }
+        ?.trim()
 
-    override fun getFilterList(): FilterList {
-        return FilterList(
-            Filter.Header("搜尋漫畫時不使用篩選條件"),
-        )
-    }
+    override fun getFilterList(): FilterList = FilterList(
+        Filter.Header("搜尋漫畫時不使用篩選條件"),
+    )
 
     companion object {
         private val DATE_FORMATS = listOf(
