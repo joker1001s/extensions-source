@@ -11,7 +11,6 @@ import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.annotation.Source
 import keiyoushi.utils.asJsoup
 import keiyoushi.utils.extractNextJs
-import keiyoushi.utils.parseAs
 import kotlinx.serialization.Serializable
 import okhttp3.Request
 import okhttp3.Response
@@ -382,96 +381,100 @@ abstract class Roumanwu : HttpSource() {
             .build(),
     )
 
-override fun pageListParse(response: Response): List<Page> {
-    val body = response.body.string()
+    override fun pageListParse(response: Response): List<Page> {
+        val body = response.body.string()
 
-    val fromNextJs = body
-        .asJsoup(baseUrl)
-        .extractNextJs<ChapterPages>()
-        ?.toPageList()
-        .orEmpty()
+        val fromNextJs = body
+            .asJsoup(baseUrl)
+            .extractNextJs<ChapterPages>()
+            ?.toPageList()
+            .orEmpty()
 
-    if (fromNextJs.isNotEmpty()) {
-        return fromNextJs
-    }
-
-    return parseTanStackImagePaths(body)
-}
-
-private fun parseTanStackImagePaths(body: String): List<Page> {
-    val marker = body.indexOf("imagePaths:")
-
-    if (marker < 0) {
-        return emptyList()
-    }
-
-    val start = body.indexOf('[', marker)
-
-    if (start < 0) {
-        return emptyList()
-    }
-
-    val end = findArrayEnd(body, start)
-
-    if (end < 0) {
-        return emptyList()
-    }
-
-    val array = body.substring(start, end + 1)
-
-    return URL_REGEX
-        .findAll(array)
-        .mapNotNull { match ->
-            match.groupValues
-                .getOrNull(1)
-                ?.replace("\\/", "/")
-                ?.replace("\\u002F", "/")
-                ?.replace("&amp;", "&")
-                ?.trim()
-                ?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+        if (fromNextJs.isNotEmpty()) {
+            return fromNextJs
         }
-        .distinct()
-        .mapIndexed { index, url ->
-            Page(index, imageUrl = url)
+
+        return parseTanStackImagePaths(body)
+    }
+
+    private fun parseTanStackImagePaths(body: String): List<Page> {
+        val marker = body.indexOf("imagePaths:")
+
+        if (marker < 0) {
+            return emptyList()
         }
-}
 
-private fun findArrayEnd(
-    body: String,
-    start: Int,
-): Int {
-    var depth = 0
-    var inString = false
-    var escaped = false
+        val start = body.indexOf('[', marker)
 
-    for (index in start until body.length) {
-        val char = body[index]
+        if (start < 0) {
+            return emptyList()
+        }
 
-        if (inString) {
-            if (escaped) {
-                escaped = false
-            } else if (char == '\\') {
-                escaped = true
-            } else if (char == '"') {
-                inString = false
+        val end = findArrayEnd(body, start)
+
+        if (end < 0) {
+            return emptyList()
+        }
+
+        val array = body.substring(start, end + 1)
+
+        return URL_REGEX
+            .findAll(array)
+            .mapNotNull { match ->
+                match.groupValues
+                    .getOrNull(1)
+                    ?.replace("\\/", "/")
+                    ?.replace("\\u002F", "/")
+                    ?.replace("&amp;", "&")
+                    ?.trim()
+                    ?.takeIf {
+                        it.startsWith("http://") ||
+                            it.startsWith("https://")
+                    }
             }
-        } else {
-            when (char) {
-                '"' -> inString = true
-                '[' -> depth++
-                ']' -> {
-                    depth--
+            .distinct()
+            .mapIndexed { index, url ->
+                Page(index, imageUrl = url)
+            }
+            .toList()
+    }
 
-                    if (depth == 0) {
-                        return index
+    private fun findArrayEnd(
+        body: String,
+        start: Int,
+    ): Int {
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for (index in start until body.length) {
+            val char = body[index]
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (char == '\\') {
+                    escaped = true
+                } else if (char == '"') {
+                    inString = false
+                }
+            } else {
+                when (char) {
+                    '"' -> inString = true
+                    '[' -> depth++
+                    ']' -> {
+                        depth--
+
+                        if (depth == 0) {
+                            return index
+                        }
                     }
                 }
             }
         }
-    }
 
-    return -1
-}
+        return -1
+    }
 
     override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
@@ -511,16 +514,16 @@ private fun findArrayEnd(
     }
 
     companion object {
-private val DATE_FORMATS = listOf(
-    "M/d/yyyy",
-    "MM/dd/yyyy",
-    "M/d/yyyy HH:mm",
-    "yyyy-MM-dd",
-    "yyyy/MM/dd",
-)
+        private val DATE_FORMATS = listOf(
+            "M/d/yyyy",
+            "MM/dd/yyyy",
+            "M/d/yyyy HH:mm",
+            "yyyy-MM-dd",
+            "yyyy/MM/dd",
+        )
 
-private val URL_REGEX = Regex(
-    """"(https?://[^"]+)"""",
-)
+        private val URL_REGEX = Regex(
+            """"(https?://[^"]+)"""",
+        )
     }
 }
