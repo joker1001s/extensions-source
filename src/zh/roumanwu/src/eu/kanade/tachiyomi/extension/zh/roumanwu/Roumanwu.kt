@@ -408,29 +408,20 @@ abstract class Roumanwu : HttpSource() {
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
-        val urls = LinkedHashSet<String>()
 
-        IMAGE_URL_REGEX.findAll(body)
+        // 只读取 imagePaths 数组。
+        // 这样广告图片、封面图片、推荐图片不会被当成漫画页。
+        val imagePathsMatch = IMAGE_PATHS_REGEX.find(body)
+            ?: return emptyList()
+
+        val imagePaths = imagePathsMatch.groupValues[1]
+
+        return IMAGE_URL_REGEX.findAll(imagePaths)
             .map { it.groupValues[1] }
-            .forEach { url ->
-                urls.add(normalizeImageUrl(url))
-            }
-
-        ESCAPED_IMAGE_URL_REGEX.findAll(body)
-            .map { it.groupValues[1] }
-            .forEach { url ->
-                urls.add(normalizeImageUrl(url))
-            }
-
-        LOOSE_IMAGE_URL_REGEX.findAll(body)
-            .map { it.groupValues[1] }
-            .forEach { url ->
-                urls.add(normalizeImageUrl(url))
-            }
-
-        return urls
+            .map(::normalizeImageUrl)
             .filter { it.contains("kelv47.xyz") }
-            .filter { it.contains(".webp") }
+            .filter { it.substringBefore("?").endsWith(".webp") }
+            .distinct()
             .mapIndexed { index, url ->
                 Page(
                     index,
@@ -487,16 +478,24 @@ abstract class Roumanwu : HttpSource() {
             "yyyy/MM/dd",
         )
 
+        /**
+         * 匹配网页中的：
+         *
+         * imagePaths: $R[27] = [
+         *     "https://v1.kelv47.xyz/xxx/00001.webp",
+         *     "https://v1.kelv47.xyz/xxx/00002.webp",
+         *     ...
+         * ]
+         *
+         * 只截取 imagePaths 数组，避免扫描整个 HTML。
+         */
+        private val IMAGE_PATHS_REGEX = Regex(
+            """imagePaths\s*:\s*\$R\[\d+\]\s*=\s*\[(.*?)]\s*,\s*userId""",
+            setOf(RegexOption.DOT_MATCHES_ALL),
+        )
+
         private val IMAGE_URL_REGEX = Regex(
-            """"(https?://[^"]+\.webp[^"]*)"""",
-        )
-
-        private val ESCAPED_IMAGE_URL_REGEX = Regex(
-            """"(https:\\/\\/[^"]+?\.webp[^"]*)"""",
-        )
-
-        private val LOOSE_IMAGE_URL_REGEX = Regex(
-            """(https?://[^"'\\\s]+kelv47\.xyz[^"'\\\s]+?\.webp[^"'\\\s]*)""",
+            """"(https?://[^"]+?\.webp(?:\?[^"]*)?)"""",
         )
     }
 }
