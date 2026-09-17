@@ -479,7 +479,7 @@ abstract class Roumanwu : HttpSource() {
         )
 
         /**
-         * 匹配网页中的：
+         * 只匹配网页中的 imagePaths 数组：
          *
          * imagePaths: $R[27] = [
          *     "https://v1.kelv47.xyz/xxx/00001.webp",
@@ -487,10 +487,10 @@ abstract class Roumanwu : HttpSource() {
          *     ...
          * ]
          *
-         * 只截取 imagePaths 数组，避免扫描整个 HTML。
+         * 使用 ${'$'}R 是为了让 Kotlin 正确匹配网页中的字面量 $R。
          */
         private val IMAGE_PATHS_REGEX = Regex(
-            """imagePaths\s*:\s*\$R\[\d+\]\s*=\s*\[(.*?)]\s*,\s*userId""",
+            """imagePaths\s*:\s*\${'$'}R\[\d+\]\s*=\s*\[(.*?)]\s*,\s*userId""",
             setOf(RegexOption.DOT_MATCHES_ALL),
         )
 
