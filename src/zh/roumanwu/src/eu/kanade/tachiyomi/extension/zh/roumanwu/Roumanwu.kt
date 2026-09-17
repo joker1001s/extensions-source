@@ -37,10 +37,12 @@ abstract class Roumanwu : HttpSource() {
         headers,
     )
 
-    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun popularMangaParse(response: Response): MangasPage =
+        parseMangaList(response.asJsoup())
 
     // Latest
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
+    override fun latestUpdatesRequest(page: Int): Request =
+        GET("$baseUrl/home", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -91,7 +93,8 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun searchMangaParse(response: Response): MangasPage =
+        parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
@@ -149,7 +152,8 @@ abstract class Roumanwu : HttpSource() {
     }
 
     // Manga details
-    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
+    override fun mangaDetailsParse(response: Response): SManga =
+        parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -407,25 +411,19 @@ abstract class Roumanwu : HttpSource() {
     }
 
     /**
-     * 只从章节页面的 imagePaths 数据中获取漫画图片。
+     * 只从章节页面的 imagePaths 数组获取漫画图片。
      *
-     * 页面中可能同时存在：
-     * - 广告图片
-     * - 弹窗图片
-     * - 网站 Logo
-     * - 漫画封面
-     * - 推荐漫画图片
+     * 不扫描整个 HTML。
+     *
+     * 页面里的：
+     * - 广告
+     * - 弹窗
+     * - Logo
+     * - 封面
+     * - 推荐漫画
      * - 其他第三方图片
      *
-     * 这些都不会参与章节 Page 创建。
-     *
-     * 实际章节数据格式：
-     *
-     * imagePaths: $R[27] = [
-     *     "https://v1.kelv47.xyz/.../00001.webp",
-     *     "https://v1.kelv47.xyz/.../00002.webp",
-     *     ...
-     * ]
+     * 都不会进入 Page 列表。
      */
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
@@ -449,10 +447,14 @@ abstract class Roumanwu : HttpSource() {
     }
 
     /**
-     * 提取 imagePaths 数组本身。
+     * 定位章节页面里的 imagePaths 数组。
      *
-     * 不直接使用正则跨整个 HTML 匹配图片，
-     * 避免广告或其他页面资源进入章节图片列表。
+     * 页面实际结构类似：
+     *
+     * imagePaths: $R[27] = [
+     *     "https://v1.kelv47.xyz/.../00001.webp",
+     *     "https://v1.kelv47.xyz/.../00002.webp"
+     * ]
      */
     private fun extractImagePaths(body: String): String? {
         val marker = "imagePaths:"
@@ -507,24 +509,32 @@ abstract class Roumanwu : HttpSource() {
     }
 
     /**
-     * 只允许真正的漫画 CDN 图片。
+     * 严格判断是否为漫画正文图片。
      *
-     * 当前章节图片特征：
-     * - Host: kelv47.xyz
-     * - 文件格式: webp
+     * 当前 Roumanwu 章节实际图片：
+     * https://v1.kelv47.xyz/.../00001.webp
      *
-     * 广告的 towm85.xyz、png、gif、jpg 等都会被排除。
+     * 因此只允许：
+     * 1. kelv47.xyz
+     * 2. .webp
+     *
+     * 例如：
+     * https://towm85.xyz/...png
+     * https://kelv47.xyz/...gif
+     * https://kelv47.xyz/...jpg
+     *
+     * 都会被排除。
      */
     private fun isMangaImage(url: String): Boolean {
         val cleanUrl = url.substringBefore("?")
-        val host = runCatching {
-            okhttp3.HttpUrl.Companion.toHttpUrl(url).host
-        }.getOrNull()
 
-        return host == "kelv47.xyz" &&
+        return cleanUrl.startsWith("https://kelv47.xyz/") &&
             cleanUrl.endsWith(".webp")
     }
 
+    /**
+     * 只有真正的漫画图片才允许作为 Image URL。
+     */
     override fun imageUrlParse(response: Response): String {
         val url = response.request.url.toString()
 
@@ -581,11 +591,9 @@ abstract class Roumanwu : HttpSource() {
         )
 
         /**
-         * 只匹配 imagePaths 数组内部的完整 URL。
+         * 这里只在已经截取出来的 imagePaths 数组内部匹配 URL。
          *
-         * 注意：
-         * 这里不再匹配 $R，避免 Kotlin 将 R 当成变量。
-         * extractImagePaths() 已经负责定位真正的数组。
+         * 因此广告 URL 不会因为出现在 HTML 其他位置而被匹配。
          */
         private val IMAGE_URL_REGEX = Regex(
             """"(https?://[^"]+)"""",
