@@ -12,6 +12,7 @@ import keiyoushi.annotation.Source
 import keiyoushi.utils.asJsoup
 import okhttp3.Request
 import okhttp3.Response
+import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import java.net.URLEncoder
@@ -38,10 +39,7 @@ abstract class Roumanwu : HttpSource() {
 
     override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
-    override fun latestUpdatesRequest(page: Int): Request = GET(
-        "$baseUrl/home",
-        headers,
-    )
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -242,9 +240,7 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseLegacyMangaDetails(
-        document: Document,
-    ): SManga {
+    private fun parseLegacyMangaDetails(document: Document): SManga {
         val title = document
             .selectFirst("h1")
             ?.text()
@@ -325,16 +321,14 @@ abstract class Roumanwu : HttpSource() {
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
 
-        return document
+        val chapters = document
             .select("a.site-chapter-link[href*=/books/]")
             .mapNotNull { element ->
-                val rawUrl = element
+                val url = element
                     .attr("href")
                     .trim()
                     .takeIf(String::isNotEmpty)
                     ?: return@mapNotNull null
-
-                val url = convertChapterUrlToApi(rawUrl)
 
                 val span = element.selectFirst("span")
 
@@ -353,37 +347,23 @@ abstract class Roumanwu : HttpSource() {
             .distinctBy { it.url }
             .asReversed()
             .toMutableList()
-            .also { chapters ->
-                if (chapters.isNotEmpty()) {
-                    val dateText = document
-                        .selectFirst(
-                            "dl.site-book-data dt:contains(更新) + dd",
-                        )
-                        ?.text()
-                        ?.trim()
 
-                    parseDate(dateText)
-                        .takeIf { it != 0L }
-                        ?.let {
-                            chapters[0].date_upload = it
-                        }
+        if (chapters.isNotEmpty()) {
+            val dateText = document
+                .selectFirst(
+                    "dl.site-book-data dt:contains(更新) + dd",
+                )
+                ?.text()
+                ?.trim()
+
+            parseDate(dateText)
+                .takeIf { it != 0L }
+                ?.let {
+                    chapters[0].date_upload = it
                 }
-            }
-    }
-
-    private fun convertChapterUrlToApi(url: String): String {
-        val normalized = url
-            .removePrefix(baseUrl)
-            .trim()
-
-        return when {
-            normalized.startsWith("/api/books/") -> normalized
-            normalized.startsWith("/books/") -> normalized.replaceFirst(
-                "/books/",
-                "/api/books/",
-            )
-            else -> normalized
         }
+
+        return chapters
     }
 
     override fun pageListRequest(chapter: SChapter): Request = GET(
@@ -391,164 +371,84 @@ abstract class Roumanwu : HttpSource() {
         headers.newBuilder()
             .add(
                 "Accept",
-                "application/json, text/plain, */*",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             )
             .add(
-                "X-Requested-With",
-                "XMLHttpRequest",
+                "Referer",
+                baseUrl + "/",
             )
             .build(),
     )
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
-        val imageUrls = parseApiImages(body)
 
-        return imageUrls.mapIndexed { index, url ->
-            Page(index, imageUrl = url)
-        }
-    }
+        val imagePaths = parseImagePaths(body)
 
-    override fun imageUrlParse(response: Response): String = response.request.url.toString()
-
-    private fun parseApiImages(body: String): List<String> {
-        val chapterStart = findChapterObject(body)
-
-        if (chapterStart < 0) {
-            return emptyList()
+        if (imagePaths.isNotEmpty()) {
+            return imagePaths.mapIndexed { index, url ->
+                Page(index, imageUrl = url)
+            }
         }
 
-        val imagesStart = body.indexOf(
-            "\"images\"",
-            chapterStart,
-        )
-
-        if (imagesStart < 0) {
-            return emptyList()
-        }
-
-        val arrayStart = body.indexOf(
-            '[',
-            imagesStart,
-        )
-
-        if (arrayStart < 0) {
-            return emptyList()
-        }
-
-        val arrayEnd = findMatchingBracket(
-            body,
-            arrayStart,
-        )
-
-        if (arrayEnd < 0) {
-            return emptyList()
-        }
-
-        val imagesJson = body.substring(
-            arrayStart,
-            arrayEnd + 1,
-        )
-
-        return IMAGE_SRC_REGEX
-            .findAll(imagesJson)
+        val imageUrls = IMAGE_URL_REGEX
+            .findAll(body)
             .mapNotNull { match ->
                 match.groupValues
                     .getOrNull(1)
                     ?.unescapeUrl()
-                    ?.normalizeImageUrl()
-                    ?.takeIf(::isComicImage)
+                    ?.takeIf(String::isNotEmpty)
             }
             .distinct()
             .toList()
-    }
 
-    private fun findChapterObject(body: String): Int {
-        val chapterIndex = body.indexOf("\"chapter\"")
+        if (imageUrls.isNotEmpty()) {
+            return imageUrls.mapIndexed { index, url ->
+                Page(index, imageUrl = url)
+            }
+        }
 
-        if (chapterIndex >= 0) {
-            val objectStart = body.indexOf(
-                '{',
-                chapterIndex,
+        return Jsoup
+            .parse(
+                body,
+                response.request.url.toString(),
             )
-
-            if (objectStart >= 0) {
-                return objectStart
+            .select("img")
+            .mapNotNull { image ->
+                firstNonEmpty(
+                    image.absUrl("src"),
+                    image.absUrl("data-src"),
+                    image.absUrl("data-original"),
+                )
             }
-        }
-
-        return body.indexOf("{\"images\"")
+            .filter { url ->
+                url.startsWith("http://") || url.startsWith("https://")
+            }
+            .distinct()
+            .mapIndexed { index, url ->
+                Page(index, imageUrl = url)
+            }
     }
 
-    private fun findMatchingBracket(
-        text: String,
-        start: Int,
-    ): Int {
-        var depth = 0
-        var inString = false
-        var escaped = false
+    override fun imageUrlParse(response: Response): String = response.request.url.toString()
 
-        for (index in start until text.length) {
-            val char = text[index]
+    private fun parseImagePaths(body: String): List<String> {
+        val array = IMAGE_PATHS_REGEX
+            .find(body)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?: return emptyList()
 
-            if (inString) {
-                if (escaped) {
-                    escaped = false
-                } else if (char == '\\') {
-                    escaped = true
-                } else if (char == '"') {
-                    inString = false
-                }
-
-                continue
+        return URL_IN_ARRAY_REGEX
+            .findAll(array)
+            .mapNotNull { match ->
+                match.groupValues
+                    .getOrNull(1)
+                    ?.unescapeUrl()
+                    ?.takeIf(String::isNotEmpty)
             }
-
-            when (char) {
-                '"' -> inString = true
-                '[' -> depth++
-                ']' -> {
-                    depth--
-
-                    if (depth == 0) {
-                        return index
-                    }
-                }
-            }
-        }
-
-        return -1
-    }
-
-    private fun String.normalizeImageUrl(): String = when {
-        startsWith("//") -> "https:$this"
-        startsWith("/") -> baseUrl + this
-        else -> this
-    }
-
-    private fun isComicImage(url: String): Boolean {
-        val lower = url.lowercase(Locale.ROOT)
-
-        val blockedWords = listOf(
-            "logo",
-            "avatar",
-            "banner",
-            "favicon",
-            "popup",
-            "pop-up",
-            "advert",
-            "adsense",
-            "tracking",
-            "analytics",
-            "icon",
-        )
-
-        if (blockedWords.any(lower::contains)) {
-            return false
-        }
-
-        return IMAGE_EXTENSIONS.any {
-            lower.substringBefore('?').endsWith(it)
-        }
+            .distinct()
+            .toList()
     }
 
     private fun parseDate(value: String?): Long {
@@ -558,11 +458,7 @@ abstract class Roumanwu : HttpSource() {
 
         DATE_FORMATS.forEach { format ->
             try {
-                val parser = SimpleDateFormat(
-                    format,
-                    Locale.ROOT,
-                )
-
+                val parser = SimpleDateFormat(format, Locale.ROOT)
                 parser.isLenient = false
 
                 return parser.parse(value.trim())?.time ?: 0L
@@ -595,16 +491,17 @@ abstract class Roumanwu : HttpSource() {
             "yyyy/MM/dd",
         )
 
-        private val IMAGE_SRC_REGEX = Regex(
-            """"src"\s*:\s*"([^"]+)"""",
+        private val IMAGE_PATHS_REGEX = Regex(
+            """["']?imagePaths["']?\s*[:=]\s*\[(.*?)]""",
+            setOf(RegexOption.DOT_MATCHES_ALL),
         )
 
-        private val IMAGE_EXTENSIONS = listOf(
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-            ".gif",
+        private val URL_IN_ARRAY_REGEX = Regex(
+            """"(https?://[^"]+)"""",
+        )
+
+        private val IMAGE_URL_REGEX = Regex(
+            """"imageUrl"\s*:\s*"([^"]+)"""",
         )
     }
 }
