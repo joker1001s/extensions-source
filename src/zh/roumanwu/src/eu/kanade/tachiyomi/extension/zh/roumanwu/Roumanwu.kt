@@ -406,21 +406,38 @@ abstract class Roumanwu : HttpSource() {
         )
     }
 
+    /**
+     * 只从章节页面的 imagePaths 数据中获取漫画图片。
+     *
+     * 页面中可能同时存在：
+     * - 广告图片
+     * - 弹窗图片
+     * - 网站 Logo
+     * - 漫画封面
+     * - 推荐漫画图片
+     * - 其他第三方图片
+     *
+     * 这些都不会参与章节 Page 创建。
+     *
+     * 实际章节数据格式：
+     *
+     * imagePaths: $R[27] = [
+     *     "https://v1.kelv47.xyz/.../00001.webp",
+     *     "https://v1.kelv47.xyz/.../00002.webp",
+     *     ...
+     * ]
+     */
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
 
-        // 只读取 imagePaths 数组。
-        // 这样广告图片、封面图片、推荐图片不会被当成漫画页。
-        val imagePathsMatch = IMAGE_PATHS_REGEX.find(body)
+        val imagePaths = extractImagePaths(body)
             ?: return emptyList()
 
-        val imagePaths = imagePathsMatch.groupValues[1]
-
-        return IMAGE_URL_REGEX.findAll(imagePaths)
+        return IMAGE_URL_REGEX
+            .findAll(imagePaths)
             .map { it.groupValues[1] }
             .map(::normalizeImageUrl)
-            .filter { it.contains("kelv47.xyz") }
-            .filter { it.substringBefore("?").endsWith(".webp") }
+            .filter(::isMangaImage)
             .distinct()
             .mapIndexed { index, url ->
                 Page(
@@ -431,7 +448,92 @@ abstract class Roumanwu : HttpSource() {
             .toList()
     }
 
-    override fun imageUrlParse(response: Response): String = response.request.url.toString()
+    /**
+     * 提取 imagePaths 数组本身。
+     *
+     * 不直接使用正则跨整个 HTML 匹配图片，
+     * 避免广告或其他页面资源进入章节图片列表。
+     */
+    private fun extractImagePaths(body: String): String? {
+        val marker = "imagePaths:"
+        val start = body.indexOf(marker)
+
+        if (start < 0) {
+            return null
+        }
+
+        val arrayStart = body.indexOf('[', start)
+
+        if (arrayStart < 0) {
+            return null
+        }
+
+        var depth = 0
+        var inString = false
+        var escaped = false
+
+        for (index in arrayStart until body.length) {
+            val char = body[index]
+
+            if (inString) {
+                if (escaped) {
+                    escaped = false
+                } else if (char == '\\') {
+                    escaped = true
+                } else if (char == '"') {
+                    inString = false
+                }
+
+                continue
+            }
+
+            when (char) {
+                '"' -> inString = true
+                '[' -> depth++
+                ']' -> {
+                    depth--
+
+                    if (depth == 0) {
+                        return body.substring(
+                            arrayStart + 1,
+                            index,
+                        )
+                    }
+                }
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * 只允许真正的漫画 CDN 图片。
+     *
+     * 当前章节图片特征：
+     * - Host: kelv47.xyz
+     * - 文件格式: webp
+     *
+     * 广告的 towm85.xyz、png、gif、jpg 等都会被排除。
+     */
+    private fun isMangaImage(url: String): Boolean {
+        val cleanUrl = url.substringBefore("?")
+        val host = runCatching {
+            okhttp3.HttpUrl.Companion.toHttpUrl(url).host
+        }.getOrNull()
+
+        return host == "kelv47.xyz" &&
+            cleanUrl.endsWith(".webp")
+    }
+
+    override fun imageUrlParse(response: Response): String {
+        val url = response.request.url.toString()
+
+        return if (isMangaImage(url)) {
+            url
+        } else {
+            ""
+        }
+    }
 
     private fun normalizeImageUrl(url: String): String = url
         .replace("\\/", "/")
@@ -479,23 +581,14 @@ abstract class Roumanwu : HttpSource() {
         )
 
         /**
-         * 只匹配网页中的 imagePaths 数组：
+         * 只匹配 imagePaths 数组内部的完整 URL。
          *
-         * imagePaths: $R[27] = [
-         *     "https://v1.kelv47.xyz/xxx/00001.webp",
-         *     "https://v1.kelv47.xyz/xxx/00002.webp",
-         *     ...
-         * ]
-         *
-         * 使用 ${'$'}R 是为了让 Kotlin 正确匹配网页中的字面量 $R。
+         * 注意：
+         * 这里不再匹配 $R，避免 Kotlin 将 R 当成变量。
+         * extractImagePaths() 已经负责定位真正的数组。
          */
-        private val IMAGE_PATHS_REGEX = Regex(
-            """imagePaths\s*:\s*\${'$'}R\[\d+\]\s*=\s*\[(.*?)]\s*,\s*userId""",
-            setOf(RegexOption.DOT_MATCHES_ALL),
-        )
-
         private val IMAGE_URL_REGEX = Regex(
-            """"(https?://[^"]+?\.webp(?:\?[^"]*)?)"""",
+            """"(https?://[^"]+)"""",
         )
     }
 }
