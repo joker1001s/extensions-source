@@ -394,31 +394,31 @@ abstract class Roumanwu : HttpSource() {
             return fromNextJs
         }
 
-        return parseTanStackImagePaths(body)
+        return parseImagePaths(body)
     }
 
-    private fun parseTanStackImagePaths(body: String): List<Page> {
+    private fun parseImagePaths(body: String): List<Page> {
         val marker = body.indexOf("imagePaths:")
 
         if (marker < 0) {
             return emptyList()
         }
 
-        val start = body.indexOf('[', marker)
+        val arrayStart = body.indexOf('[', marker)
 
-        if (start < 0) {
+        if (arrayStart < 0) {
             return emptyList()
         }
 
-        val end = findArrayEnd(body, start)
+        val arrayEnd = findArrayEnd(body, arrayStart)
 
-        if (end < 0) {
+        if (arrayEnd < 0) {
             return emptyList()
         }
 
-        val array = body.substring(start, end + 1)
+        val array = body.substring(arrayStart, arrayEnd + 1)
 
-        return URL_REGEX
+        return IMAGE_URL_REGEX
             .findAll(array)
             .mapNotNull { match ->
                 match.groupValues
@@ -522,7 +522,7 @@ abstract class Roumanwu : HttpSource() {
             "yyyy/MM/dd",
         )
 
-        private val URL_REGEX = Regex(
+        private val IMAGE_URL_REGEX = Regex(
             """"(https?://[^"]+)"""",
         )
     }
