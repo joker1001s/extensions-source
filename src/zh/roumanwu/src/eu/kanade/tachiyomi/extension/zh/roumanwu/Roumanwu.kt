@@ -10,8 +10,6 @@ import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.HttpSource
 import keiyoushi.annotation.Source
 import keiyoushi.utils.asJsoup
-import keiyoushi.utils.extractNextJs
-import kotlinx.serialization.Serializable
 import okhttp3.Request
 import okhttp3.Response
 import org.jsoup.nodes.Document
@@ -29,18 +27,26 @@ abstract class Roumanwu : HttpSource() {
         .addInterceptor(ScrambledImageInterceptor())
         .build()
 
-    override fun popularMangaRequest(page: Int): Request = GET(
-        if (page == 1) {
-            "$baseUrl/books"
-        } else {
-            "$baseUrl/books?page=${page - 1}"
-        },
-        headers,
-    )
+    // Popular
+    override fun popularMangaRequest(page: Int): Request {
+        return GET(
+            if (page == 1) {
+                "$baseUrl/books"
+            } else {
+                "$baseUrl/books?page=${page - 1}"
+            },
+            headers,
+        )
+    }
 
-    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun popularMangaParse(response: Response): MangasPage {
+        return parseMangaList(response.asJsoup())
+    }
 
-    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
+    // Latest
+    override fun latestUpdatesRequest(page: Int): Request {
+        return GET("$baseUrl/home", headers)
+    }
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -66,6 +72,7 @@ abstract class Roumanwu : HttpSource() {
         return parseMangaList(document)
     }
 
+    // Search
     override fun searchMangaRequest(
         page: Int,
         query: String,
@@ -90,43 +97,47 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
+    override fun searchMangaParse(response: Response): MangasPage {
+        return parseMangaList(response.asJsoup())
+    }
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
         return MangasPage(entries, hasNextPage(document))
     }
 
-    private fun parseEntries(container: Element): List<SManga> = container
-        .select("a.site-comic[href*=/books/]")
-        .mapNotNull { element ->
-            val url = element.attr("href")
-                .trim()
-                .takeIf(String::isNotEmpty)
-                ?: return@mapNotNull null
+    private fun parseEntries(container: Element): List<SManga> {
+        return container
+            .select("a.site-comic[href*=/books/]")
+            .mapNotNull { element ->
+                val url = element.attr("href")
+                    .trim()
+                    .takeIf(String::isNotEmpty)
+                    ?: return@mapNotNull null
 
-            val title = element
-                .selectFirst("h3")
-                ?.text()
-                ?.trim()
-                ?.takeIf(String::isNotEmpty)
-                ?: return@mapNotNull null
+                val title = element
+                    .selectFirst("h3")
+                    ?.text()
+                    ?.trim()
+                    ?.takeIf(String::isNotEmpty)
+                    ?: return@mapNotNull null
 
-            val thumbnail = element.selectFirst("img")?.let {
-                firstNonEmpty(
-                    it.absUrl("src"),
-                    it.absUrl("data-src"),
-                    it.absUrl("data-original"),
-                )
+                val thumbnail = element.selectFirst("img")?.let {
+                    firstNonEmpty(
+                        it.absUrl("src"),
+                        it.absUrl("data-src"),
+                        it.absUrl("data-original"),
+                    )
+                }
+
+                SManga.create().apply {
+                    this.title = title
+                    this.url = url
+                    thumbnail_url = thumbnail
+                }
             }
-
-            SManga.create().apply {
-                this.title = title
-                this.url = url
-                thumbnail_url = thumbnail
-            }
-        }
-        .distinctBy { it.url }
+            .distinctBy { it.url }
+    }
 
     private fun hasNextPage(document: Document): Boolean {
         val pagination = document
@@ -147,7 +158,10 @@ abstract class Roumanwu : HttpSource() {
         return current < total
     }
 
-    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
+    // Manga details
+    override fun mangaDetailsParse(response: Response): SManga {
+        return parseMangaDetails(response.asJsoup())
+    }
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -233,7 +247,11 @@ abstract class Roumanwu : HttpSource() {
 
             status = parseStatus(data["狀態"])
 
-            description = buildDescription(alias, title, synopsis)
+            description = buildDescription(
+                alias,
+                title,
+                synopsis,
+            )
 
             genre = genres
                 .takeIf { it.isNotEmpty() }
@@ -291,12 +309,14 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    private fun parseStatus(value: String?): Int = when {
-        value?.contains("連載中") == true -> SManga.ONGOING
-        value?.contains("連載") == true -> SManga.ONGOING
-        value?.contains("已完結") == true -> SManga.COMPLETED
-        value?.contains("完結") == true -> SManga.COMPLETED
-        else -> SManga.UNKNOWN
+    private fun parseStatus(value: String?): Int {
+        return when {
+            value?.contains("連載中") == true -> SManga.ONGOING
+            value?.contains("連載") == true -> SManga.ONGOING
+            value?.contains("已完結") == true -> SManga.COMPLETED
+            value?.contains("完結") == true -> SManga.COMPLETED
+            else -> SManga.UNKNOWN
+        }
     }
 
     private fun buildDescription(
@@ -319,6 +339,7 @@ abstract class Roumanwu : HttpSource() {
             ?.joinToString("\n\n")
     }
 
+    // Chapters
     override fun chapterListParse(response: Response): List<SChapter> {
         val document = response.asJsoup()
 
@@ -367,117 +388,33 @@ abstract class Roumanwu : HttpSource() {
         return chapters
     }
 
-    override fun pageListRequest(chapter: SChapter): Request = GET(
-        baseUrl + chapter.url,
-        headers.newBuilder()
-            .add(
-                "Accept",
-                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            )
-            .add(
-                "Referer",
-                baseUrl + "/",
-            )
-            .build(),
-    )
+    // Chapter pages
+    override fun pageListRequest(chapter: SChapter): Request {
+        return super.pageListRequest(chapter)
+            .newBuilder()
+            .addHeader("rsc", "1")
+            .build()
+    }
 
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
 
-        val fromNextJs = body
-            .asJsoup(baseUrl)
-            .extractNextJs<ChapterPages>()
-            ?.toPageList()
-            .orEmpty()
-
-        if (fromNextJs.isNotEmpty()) {
-            return fromNextJs
-        }
-
-        return parseImagePaths(body)
-    }
-
-    private fun parseImagePaths(body: String): List<Page> {
-        val marker = body.indexOf("imagePaths:")
-
-        if (marker < 0) {
-            return emptyList()
-        }
-
-        val arrayStart = body.indexOf('[', marker)
-
-        if (arrayStart < 0) {
-            return emptyList()
-        }
-
-        val arrayEnd = findArrayEnd(body, arrayStart)
-
-        if (arrayEnd < 0) {
-            return emptyList()
-        }
-
-        val array = body.substring(arrayStart, arrayEnd + 1)
-
         return IMAGE_URL_REGEX
-            .findAll(array)
-            .mapNotNull { match ->
-                match.groupValues
-                    .getOrNull(1)
-                    ?.replace("\\/", "/")
-                    ?.replace("\\u002F", "/")
-                    ?.replace("&amp;", "&")
-                    ?.trim()
-                    ?.takeIf {
-                        it.startsWith("http://") ||
-                            it.startsWith("https://")
-                    }
-            }
-            .distinct()
-            .mapIndexed { index, url ->
-                Page(index, imageUrl = url)
+            .findAll(body)
+            .mapIndexed { index, match ->
+                Page(
+                    index,
+                    imageUrl = match.groupValues[1],
+                )
             }
             .toList()
     }
 
-    private fun findArrayEnd(
-        body: String,
-        start: Int,
-    ): Int {
-        var depth = 0
-        var inString = false
-        var escaped = false
-
-        for (index in start until body.length) {
-            val char = body[index]
-
-            if (inString) {
-                if (escaped) {
-                    escaped = false
-                } else if (char == '\\') {
-                    escaped = true
-                } else if (char == '"') {
-                    inString = false
-                }
-            } else {
-                when (char) {
-                    '"' -> inString = true
-                    '[' -> depth++
-                    ']' -> {
-                        depth--
-
-                        if (depth == 0) {
-                            return index
-                        }
-                    }
-                }
-            }
-        }
-
-        return -1
+    override fun imageUrlParse(response: Response): String {
+        return response.request.url.toString()
     }
 
-    override fun imageUrlParse(response: Response): String = response.request.url.toString()
-
+    // Date
     private fun parseDate(value: String?): Long {
         if (value.isNullOrBlank()) {
             return 0L
@@ -485,7 +422,10 @@ abstract class Roumanwu : HttpSource() {
 
         DATE_FORMATS.forEach { format ->
             try {
-                val parser = SimpleDateFormat(format, Locale.ROOT)
+                val parser = SimpleDateFormat(
+                    format,
+                    Locale.ROOT,
+                )
                 parser.isLenient = false
 
                 return parser.parse(value.trim())?.time ?: 0L
@@ -496,21 +436,16 @@ abstract class Roumanwu : HttpSource() {
         return 0L
     }
 
-    private fun firstNonEmpty(vararg values: String?): String? = values
-        .firstOrNull { !it.isNullOrBlank() }
-        ?.trim()
+    private fun firstNonEmpty(vararg values: String?): String? {
+        return values
+            .firstOrNull { !it.isNullOrBlank() }
+            ?.trim()
+    }
 
-    override fun getFilterList(): FilterList = FilterList(
-        Filter.Header("搜尋漫畫時不使用篩選條件"),
-    )
-
-    @Serializable
-    private class ChapterPages(
-        private val imagePaths: List<String>,
-    ) {
-        fun toPageList(): List<Page> = imagePaths.mapIndexed { index, url ->
-            Page(index, imageUrl = url)
-        }
+    override fun getFilterList(): FilterList {
+        return FilterList(
+            Filter.Header("搜尋漫畫時不使用篩選條件"),
+        )
     }
 
     companion object {
@@ -523,7 +458,7 @@ abstract class Roumanwu : HttpSource() {
         )
 
         private val IMAGE_URL_REGEX = Regex(
-            """"(https?://[^"]+)"""",
+            """"imageUrl":"([^"]+)"""",
         )
     }
 }
