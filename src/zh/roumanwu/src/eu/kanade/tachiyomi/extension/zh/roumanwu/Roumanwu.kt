@@ -37,12 +37,10 @@ abstract class Roumanwu : HttpSource() {
         headers,
     )
 
-    override fun popularMangaParse(response: Response): MangasPage =
-        parseMangaList(response.asJsoup())
+    override fun popularMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     // Latest
-    override fun latestUpdatesRequest(page: Int): Request =
-        GET("$baseUrl/home", headers)
+    override fun latestUpdatesRequest(page: Int): Request = GET("$baseUrl/home", headers)
 
     override fun latestUpdatesParse(response: Response): MangasPage {
         val document = response.asJsoup()
@@ -93,8 +91,7 @@ abstract class Roumanwu : HttpSource() {
         }
     }
 
-    override fun searchMangaParse(response: Response): MangasPage =
-        parseMangaList(response.asJsoup())
+    override fun searchMangaParse(response: Response): MangasPage = parseMangaList(response.asJsoup())
 
     private fun parseMangaList(document: Document): MangasPage {
         val entries = parseEntries(document)
@@ -152,8 +149,7 @@ abstract class Roumanwu : HttpSource() {
     }
 
     // Manga details
-    override fun mangaDetailsParse(response: Response): SManga =
-        parseMangaDetails(response.asJsoup())
+    override fun mangaDetailsParse(response: Response): SManga = parseMangaDetails(response.asJsoup())
 
     private fun parseMangaDetails(document: Document): SManga {
         val info = document.selectFirst("div.site-book-info")
@@ -411,19 +407,12 @@ abstract class Roumanwu : HttpSource() {
     }
 
     /**
-     * 只从章节页面的 imagePaths 数组获取漫画图片。
+     * 只从章节页面的 imagePaths 数组中获取漫画图片。
      *
      * 不扫描整个 HTML。
      *
-     * 页面里的：
-     * - 广告
-     * - 弹窗
-     * - Logo
-     * - 封面
-     * - 推荐漫画
-     * - 其他第三方图片
-     *
-     * 都不会进入 Page 列表。
+     * 页面中的广告、弹窗、Logo、封面、推荐漫画以及其他第三方图片，
+     * 都不会进入章节 Page 列表。
      */
     override fun pageListParse(response: Response): List<Page> {
         val body = response.body.string()
@@ -509,21 +498,12 @@ abstract class Roumanwu : HttpSource() {
     }
 
     /**
-     * 严格判断是否为漫画正文图片。
+     * 只允许真正的漫画 CDN 图片。
      *
-     * 当前 Roumanwu 章节实际图片：
+     * 当前章节图片使用：
      * https://v1.kelv47.xyz/.../00001.webp
      *
-     * 因此只允许：
-     * 1. kelv47.xyz
-     * 2. .webp
-     *
-     * 例如：
-     * https://towm85.xyz/...png
-     * https://kelv47.xyz/...gif
-     * https://kelv47.xyz/...jpg
-     *
-     * 都会被排除。
+     * 因此只允许 kelv47.xyz 下的 webp 图片。
      */
     private fun isMangaImage(url: String): Boolean {
         val cleanUrl = url.substringBefore("?")
@@ -591,9 +571,7 @@ abstract class Roumanwu : HttpSource() {
         )
 
         /**
-         * 这里只在已经截取出来的 imagePaths 数组内部匹配 URL。
-         *
-         * 因此广告 URL 不会因为出现在 HTML 其他位置而被匹配。
+         * 这里只匹配已经截取出来的 imagePaths 数组内部 URL。
          */
         private val IMAGE_URL_REGEX = Regex(
             """"(https?://[^"]+)"""",
